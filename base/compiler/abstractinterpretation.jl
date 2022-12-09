@@ -2037,7 +2037,7 @@ function abstract_call_known(interp::AbstractInterpreter, @nospecialize(f),
         call = abstract_call_gf_by_type(interp, f, ArgInfo(nothing, Any[Const(UnionAll), Any, Any]), si, Tuple{Type{UnionAll}, Any, Any}, sv, max_methods)
         return abstract_call_unionall(interp, argtypes, call)
     elseif f === _typeof_captured_variable
-        la == 2 || return CallMeta(Union{}, false)
+        la == 2 || return CallMeta(Union{}, EFFECTS_THROWS, NoCallInfo())
         t = argtypes[2]
         if t isa Const
             tv = t.val
@@ -2050,7 +2050,7 @@ function abstract_call_known(interp::AbstractInterpreter, @nospecialize(f),
         else
             rt = DataType
         end
-        return CallMeta(rt, false)
+        return CallMeta(rt, EFFECTS_TOTAL, MethodResultPure())
     elseif f === Tuple && la == 2
         aty = argtypes[2]
         ty = isvarargtype(aty) ? unwrapva(aty) : widenconst(aty)
