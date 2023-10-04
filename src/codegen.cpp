@@ -43,7 +43,6 @@
 
 // support
 #include <llvm/ADT/SmallBitVector.h>
-#include <llvm/ADT/Optional.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/FormattedStream.h>
@@ -163,7 +162,6 @@ typedef Instruction TerminatorInst;
 #endif
 
 #include "jitlayers.h"
-#include "llvm-codegen-shared.h"
 #include "processor.h"
 #include "julia_assert.h"
 
@@ -339,7 +337,7 @@ struct jl_typecache_t {
         };
         static_assert(sizeof(jl_array_flags_t) == sizeof(int16_t),
                     "Size of jl_array_flags_t is not the same as int16_t");
-        T_jlarray = StructType::get(context, makeArrayRef(vaelts));
+        T_jlarray = StructType::get(context, ArrayRef<Type*>(vaelts));
         T_pjlarray = PointerType::get(T_jlarray, 0);
     }
 };
@@ -610,7 +608,7 @@ AttributeSet Attributes(LLVMContext &C, std::initializer_list<Attribute::AttrKin
     SmallVector<Attribute, 8> attrs(attrkinds.size());
     for (size_t i = 0; i < attrkinds.size(); i++)
         attrs[i] = Attribute::get(C, attrkinds.begin()[i]);
-    return AttributeSet::get(C, makeArrayRef(attrs));
+    return AttributeSet::get(C, ArrayRef<Attribute>(attrs));
 }
 
 static Type *get_pjlvalue(LLVMContext &C) { return JuliaType::get_pjlvalue_ty(C); }
@@ -633,9 +631,16 @@ static AttributeList get_func_attrs(LLVMContext &C)
 
 static AttributeList get_donotdelete_func_attrs(LLVMContext &C)
 {
-    AttributeSet FnAttrs = Attributes(C, {Attribute::InaccessibleMemOnly, Attribute::WillReturn, Attribute::NoUnwind});
+    AttrBuilder FnAttrs(C);
+#if JL_LLVM_VERSION >= 160000
+    FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleMemOnly());
+#else
+    FnAttrs.addAttribute(Attribute::InaccessibleMemOnly);
+#endif
+    FnAttrs.addAttribute(Attribute::WillReturn);
+    FnAttrs.addAttribute(Attribute::NoUnwind);
     return AttributeList::get(C,
-            FnAttrs,
+            AttributeSet::get(C, FnAttrs),
             Attributes(C, {}),
             None);
 }
@@ -970,10 +975,19 @@ static const auto jlegalx_func = new JuliaFunction<TypeFnContextAndSizeT>{
     [](LLVMContext &C, Type *T_size) {
         Type *T = PointerType::get(JuliaType::get_jlvalue_ty(C), AddressSpace::Derived);
         return FunctionType::get(getInt32Ty(C), {T, T, T_size}, false); },
-    [](LLVMContext &C) { return AttributeList::get(C,
-            Attributes(C, {Attribute::ReadOnly, Attribute::NoUnwind, Attribute::ArgMemOnly}),
-            AttributeSet(),
-            None); },
+    [](LLVMContext &C) {
+        AttrBuilder FnAttrs(C);
+#if JL_LLVM_VERSION >= 160000
+        FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleOrArgMemOnly());
+#else
+        FnAttrs.addAttribute(Attribute::ReadOnly);
+        FnAttrs.addAttribute(Attribute::ArgMemOnly);
+#endif
+        FnAttrs.addAttribute(Attribute::NoUnwind);
+        return AttributeList::get(C,
+                AttributeSet::get(C, FnAttrs),
+                AttributeSet(),
+                None); },
 };
 static const auto jl_alloc_obj_func = new JuliaFunction<TypeFnContextAndSizeT>{
     "julia.gc_alloc_obj",
@@ -1021,8 +1035,17 @@ static const auto jl_typeof_func = new JuliaFunction<>{
         return FunctionType::get(T_prjlvalue,
                 {T_prjlvalue}, false);
     },
-    [](LLVMContext &C) { return AttributeList::get(C,
-            Attributes(C, {Attribute::ReadNone, Attribute::NoUnwind, Attribute::NoRecurse}),
+    [](LLVMContext &C) {
+        AttrBuilder FnAttrs(C);
+#if JL_LLVM_VERSION >= 160000
+        FnAttrs.addMemoryAttr(MemoryEffects::none());
+#else
+        FnAttrs.addAttribute(Attribute::ReadNone);
+#endif
+        FnAttrs.addAttribute(Attribute::NoUnwind);
+        FnAttrs.addAttribute(Attribute::NoRecurse);
+        return AttributeList::get(C,
+            AttributeSet::get(C, FnAttrs),
             Attributes(C, {Attribute::NonNull}),
             None); },
 };
@@ -1031,10 +1054,20 @@ static const auto jl_write_barrier_func = new JuliaFunction<>{
     "julia.write_barrier",
     [](LLVMContext &C) { return FunctionType::get(getVoidTy(C),
             {JuliaType::get_prjlvalue_ty(C)}, true); },
-    [](LLVMContext &C) { return AttributeList::get(C,
-            Attributes(C, {Attribute::NoUnwind, Attribute::NoRecurse, Attribute::InaccessibleMemOnly}),
+    [](LLVMContext &C) {
+        AttrBuilder FnAttrs(C);
+#if JL_LLVM_VERSION >= 160000
+        FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleMemOnly());
+#else
+        FnAttrs.addAttribute(Attribute::InaccessibleMemOnly);
+#endif
+        FnAttrs.addAttribute(Attribute::NoUnwind);
+        FnAttrs.addAttribute(Attribute::NoRecurse);
+        return AttributeList::get(C,
+            AttributeSet::get(C, FnAttrs),
             AttributeSet(),
-            {Attributes(C, {Attribute::ReadOnly})}); },
+            {Attributes(C, {Attribute::ReadOnly})});
+    },
 };
 
 static const auto jlisa_func = new JuliaFunction<>{
@@ -1069,7 +1102,7 @@ static const auto jlapplytype_func = new JuliaFunction<>{
     [](LLVMContext &C) {
         return AttributeList::get(C,
             AttributeSet(),
-            AttributeSet::get(C, makeArrayRef({Attribute::get(C, Attribute::NonNull),
+            AttributeSet::get(C, ArrayRef<Attribute>({Attribute::get(C, Attribute::NonNull),
                                                Attribute::getWithAlignment(C, Align(16))})),
             None);
     },
@@ -1098,8 +1131,17 @@ static const auto memcmp_func = new JuliaFunction<TypeFnContextAndSizeT>{
     XSTR(memcmp),
     [](LLVMContext &C, Type *T_size) { return FunctionType::get(getInt32Ty(C),
             {getInt8PtrTy(C), getInt8PtrTy(C), T_size}, false); },
-    [](LLVMContext &C) { return AttributeList::get(C,
-            Attributes(C, {Attribute::ReadOnly, Attribute::NoUnwind, Attribute::ArgMemOnly}),
+    [](LLVMContext &C) {
+        AttrBuilder FnAttrs(C);
+#if JL_LLVM_VERSION >= 160000
+        FnAttrs.addMemoryAttr(MemoryEffects::argMemOnly(ModRefInfo::Ref));
+#else
+        FnAttrs.addAttribute(Attribute::ArgMemOnly);
+        FnAttrs.addAttribute(Attribute::ReadOnly);
+#endif
+        FnAttrs.addAttribute(Attribute::NoUnwind);
+        return AttributeList::get(C,
+            AttributeSet::get(C, FnAttrs),
             AttributeSet(),
             None); },
     // TODO: inferLibFuncAttributes(*memcmp_func, TLI);
@@ -1144,8 +1186,17 @@ static const auto jlfieldindex_func = new JuliaFunction<>{
         return FunctionType::get(getInt32Ty(C),
             {T_prjlvalue, T_prjlvalue, getInt32Ty(C)}, false);
     },
-    [](LLVMContext &C) { return AttributeList::get(C,
-            Attributes(C, {Attribute::NoUnwind, Attribute::ReadOnly, Attribute::WillReturn}),
+    [](LLVMContext &C) {
+        AttrBuilder FnAttrs(C);
+#if JL_LLVM_VERSION >= 160000
+        FnAttrs.addMemoryAttr(MemoryEffects::readOnly());
+#else
+        FnAttrs.addAttribute(Attribute::ReadOnly);
+#endif
+        FnAttrs.addAttribute(Attribute::NoUnwind);
+        FnAttrs.addAttribute(Attribute::WillReturn);
+        return AttributeList::get(C,
+            AttributeSet::get(C, FnAttrs),
             AttributeSet(),
             None); }, // This function can error if the third argument is 1 so don't do that.
 };
@@ -1203,8 +1254,16 @@ static const auto jlarray_data_owner_func = new JuliaFunction<>{
         return FunctionType::get(T_prjlvalue,
             {T_prjlvalue}, false);
     },
-    [](LLVMContext &C) { return AttributeList::get(C,
-            Attributes(C, {Attribute::ReadOnly, Attribute::NoUnwind}),
+    [](LLVMContext &C) {
+        AttrBuilder FnAttrs(C);
+#if JL_LLVM_VERSION >= 160000
+        FnAttrs.addMemoryAttr(MemoryEffects::readOnly());
+#else
+        FnAttrs.addAttribute(Attribute::ReadOnly);
+#endif
+        FnAttrs.addAttribute(Attribute::NoUnwind);
+        return AttributeList::get(C,
+            AttributeSet::get(C, FnAttrs),
             Attributes(C, {Attribute::NonNull}),
             None); },
 };
@@ -1257,7 +1316,7 @@ static const auto except_enter_func = new JuliaFunction<>{
     "julia.except_enter",
     [](LLVMContext &C) { return FunctionType::get(getInt32Ty(C), false); },
     [](LLVMContext &C) { return AttributeList::get(C,
-            AttributeSet::get(C, makeArrayRef({Attribute::get(C, Attribute::ReturnsTwice)})),
+            AttributeSet::get(C, ArrayRef<Attribute>({Attribute::get(C, Attribute::ReturnsTwice)})),
             AttributeSet(),
             None); },
 };
@@ -1265,8 +1324,16 @@ static const auto pointer_from_objref_func = new JuliaFunction<>{
     "julia.pointer_from_objref",
     [](LLVMContext &C) { return FunctionType::get(JuliaType::get_pjlvalue_ty(C),
             {PointerType::get(JuliaType::get_jlvalue_ty(C), AddressSpace::Derived)}, false); },
-    [](LLVMContext &C) { return AttributeList::get(C,
-            AttributeSet::get(C, makeArrayRef({Attribute::get(C, Attribute::ReadNone), Attribute::get(C, Attribute::NoUnwind)})),
+    [](LLVMContext &C) {
+        AttrBuilder FnAttrs(C);
+#if JL_LLVM_VERSION >= 160000
+        FnAttrs.addMemoryAttr(MemoryEffects::none());
+#else
+        FnAttrs.addAttribute(Attribute::ReadNone);
+#endif
+        FnAttrs.addAttribute(Attribute::NoUnwind);
+        return AttributeList::get(C,
+            AttributeSet::get(C, FnAttrs),
             Attributes(C, {Attribute::NonNull}),
             None); },
 };
@@ -3071,7 +3138,7 @@ static Value *emit_bits_compare(jl_codectx_t &ctx, jl_cgval_t arg1, jl_cgval_t a
                 nroots++;
             if ((gc_uses[nroots] = get_gc_root_for(ctx, arg2)))
                 nroots++;
-            OperandBundleDef OpBundle("jl_roots", makeArrayRef(gc_uses, nroots));
+            OperandBundleDef OpBundle("jl_roots", ArrayRef<Value*>(gc_uses, nroots));
             auto answer = ctx.builder.CreateCall(prepare_call(memcmp_func), {
                         ctx.builder.CreateBitCast(varg1, getInt8PtrTy(ctx.builder.getContext())),
                         ctx.builder.CreateBitCast(varg2, getInt8PtrTy(ctx.builder.getContext())),
@@ -3515,12 +3582,12 @@ static bool emit_builtin_call(jl_codectx_t &ctx, jl_cgval_t *ret, jl_value_t *f,
                     ctx.builder.SetInsertPoint(outBB);
                     Value *v_one = ConstantInt::get(ctx.types().T_size, 1);
                     ctx.builder.CreateBr(ansBB);
-                    ctx.f->getBasicBlockList().push_back(inBB);
+                    inBB->insertInto(ctx.f);
                     ctx.builder.SetInsertPoint(inBB);
                     Value *v_sz = emit_arraysize(ctx, ary, idx_dyn);
                     ctx.builder.CreateBr(ansBB);
                     inBB = ctx.builder.GetInsertBlock(); // could have changed
-                    ctx.f->getBasicBlockList().push_back(ansBB);
+                    ansBB->insertInto(ctx.f);
                     ctx.builder.SetInsertPoint(ansBB);
                     PHINode *result = ctx.builder.CreatePHI(ctx.types().T_size, 2);
                     result->addIncoming(v_one, outBB);
@@ -4700,7 +4767,7 @@ static void undef_var_error_ifnot(jl_codectx_t &ctx, Value *ok, jl_sym_t *name)
     ctx.builder.CreateCall(prepare_call(jlundefvarerror_func),
         mark_callee_rooted(ctx, literal_pointer_val(ctx, (jl_value_t*)name)));
     ctx.builder.CreateUnreachable();
-    ctx.f->getBasicBlockList().push_back(ifok);
+    ifok->insertInto(ctx.f);
     ctx.builder.SetInsertPoint(ifok);
 }
 
@@ -4716,7 +4783,7 @@ static void emit_hasnofield_error_ifnot(jl_codectx_t &ctx, Value *ok, jl_sym_t *
                           {mark_callee_rooted(ctx, literal_pointer_val(ctx, (jl_value_t*)type)),
                            mark_callee_rooted(ctx, boxed(ctx, name))});
     ctx.builder.CreateUnreachable();
-    ctx.f->getBasicBlockList().push_back(ifok);
+    ifok->insertInto(ctx.f);
     ctx.builder.SetInsertPoint(ifok);
 }
 
@@ -4742,7 +4809,7 @@ static Value *global_binding_pointer(jl_codectx_t &ctx, jl_module_t *m, jl_sym_t
         // var not found. switch to delayed lookup.
         Constant *initnul = Constant::getNullValue(ctx.types().T_pjlvalue);
         GlobalVariable *bindinggv = new GlobalVariable(*ctx.f->getParent(), ctx.types().T_pjlvalue,
-                false, GlobalVariable::PrivateLinkage, initnul);
+                false, GlobalVariable::PrivateLinkage, initnul, "jl_binding_ptr"); // LLVM has bugs with nameless globals
         LoadInst *cachedval = ctx.builder.CreateAlignedLoad(ctx.types().T_pjlvalue, bindinggv, Align(sizeof(void*)));
         setName(ctx.emission_context, cachedval, jl_symbol_name(m->name) + StringRef(".") + jl_symbol_name(s) + ".cached");
         cachedval->setOrdering(AtomicOrdering::Unordered);
@@ -4752,7 +4819,7 @@ static Value *global_binding_pointer(jl_codectx_t &ctx, jl_module_t *m, jl_sym_t
         auto iscached = ctx.builder.CreateICmpNE(cachedval, initnul);
         setName(ctx.emission_context, iscached, "iscached");
         ctx.builder.CreateCondBr(iscached, have_val, not_found);
-        ctx.f->getBasicBlockList().push_back(not_found);
+        not_found->insertInto(ctx.f);
         ctx.builder.SetInsertPoint(not_found);
         Value *bval = ctx.builder.CreateCall(prepare_call(assign ? jlgetbindingwrorerror_func : jlgetbindingorerror_func),
                 { literal_pointer_val(ctx, (jl_value_t*)m),
@@ -4760,7 +4827,7 @@ static Value *global_binding_pointer(jl_codectx_t &ctx, jl_module_t *m, jl_sym_t
         setName(ctx.emission_context, bval, jl_symbol_name(m->name) + StringRef(".") + jl_symbol_name(s) + ".found");
         ctx.builder.CreateAlignedStore(bval, bindinggv, Align(sizeof(void*)))->setOrdering(AtomicOrdering::Release);
         ctx.builder.CreateBr(have_val);
-        ctx.f->getBasicBlockList().push_back(have_val);
+        have_val->insertInto(ctx.f);
         ctx.builder.SetInsertPoint(have_val);
         PHINode *p = ctx.builder.CreatePHI(ctx.types().T_pjlvalue, 2);
         p->addIncoming(cachedval, currentbb);
@@ -5087,10 +5154,11 @@ static void emit_phinode_assign(jl_codectx_t &ctx, ssize_t idx, jl_value_t *r)
         if (dest) {
             Instruction *phi = dest->clone();
             phi->insertAfter(dest);
-            PHINode *Tindex_phi = PHINode::Create(getInt8Ty(ctx.builder.getContext()), jl_array_len(edges), "tindex_phi");
-            BB->getInstList().insert(InsertPt, Tindex_phi);
-            PHINode *ptr_phi = PHINode::Create(ctx.types().T_prjlvalue, jl_array_len(edges), "ptr_phi");
-            BB->getInstList().insert(InsertPt, ptr_phi);
+            auto prevInsert = ctx.builder.GetInsertPoint();
+            ctx.builder.SetInsertPoint(BB, InsertPt);
+            auto Tindex_phi = ctx.builder.CreatePHI(getInt8Ty(ctx.builder.getContext()), jl_array_len(edges), "tindex_phi");
+            auto ptr_phi = ctx.builder.CreatePHI(ctx.types().T_prjlvalue, jl_array_len(edges), "ptr_phi");
+            ctx.builder.SetInsertPoint(BB, prevInsert);
             Value *isboxed = ctx.builder.CreateICmpNE(
                     ctx.builder.CreateAnd(Tindex_phi, ConstantInt::get(getInt8Ty(ctx.builder.getContext()), 0x80)),
                     ConstantInt::get(getInt8Ty(ctx.builder.getContext()), 0));
@@ -5107,8 +5175,10 @@ static void emit_phinode_assign(jl_codectx_t &ctx, ssize_t idx, jl_value_t *r)
             return;
         }
         else if (allunbox) {
-            PHINode *Tindex_phi = PHINode::Create(getInt8Ty(ctx.builder.getContext()), jl_array_len(edges), "tindex_phi");
-            BB->getInstList().insert(InsertPt, Tindex_phi);
+            auto prevInsert = ctx.builder.GetInsertPoint();
+            ctx.builder.SetInsertPoint(BB, InsertPt);
+            auto Tindex_phi = ctx.builder.CreatePHI(getInt8Ty(ctx.builder.getContext()), jl_array_len(edges), "tindex_phi");
+            ctx.builder.SetInsertPoint(BB, prevInsert);
             jl_cgval_t val = mark_julia_slot(NULL, phiType, Tindex_phi, ctx.tbaa().tbaa_stack);
             ctx.PhiNodes.push_back(std::make_tuple(val, BB, dest, (PHINode*)NULL, r));
             ctx.SAvalues[idx] = val;
@@ -5141,8 +5211,10 @@ static void emit_phinode_assign(jl_codectx_t &ctx, ssize_t idx, jl_value_t *r)
         slot = mark_julia_slot(phi, phiType, NULL, ctx.tbaa().tbaa_stack);
     }
     else {
-        value_phi = PHINode::Create(vtype, jl_array_len(edges), "value_phi");
-        BB->getInstList().insert(InsertPt, value_phi);
+        auto prevInsert = ctx.builder.GetInsertPoint();
+        ctx.builder.SetInsertPoint(BB, InsertPt);
+        value_phi = ctx.builder.CreatePHI(vtype, jl_array_len(edges), "value_phi");
+        ctx.builder.SetInsertPoint(BB, prevInsert);
         slot = mark_julia_type(ctx, value_phi, isboxed, phiType);
     }
     ctx.PhiNodes.push_back(std::make_tuple(slot, BB, dest, value_phi, r));
@@ -5662,7 +5734,7 @@ static jl_cgval_t emit_expr(jl_codectx_t &ctx, jl_value_t *expr, ssize_t ssaidx_
                 Value *mdargs[] = { name, literal_pointer_val(ctx, (jl_value_t*)mod), bp, literal_pointer_val(ctx, bnd) };
                 jl_cgval_t gf = mark_julia_type(
                         ctx,
-                        ctx.builder.CreateCall(prepare_call(jlgenericfunction_func), makeArrayRef(mdargs)),
+                        ctx.builder.CreateCall(prepare_call(jlgenericfunction_func), ArrayRef<Value*>(mdargs)),
                         true,
                         jl_function_type);
                 return gf;
@@ -5681,7 +5753,7 @@ static jl_cgval_t emit_expr(jl_codectx_t &ctx, jl_value_t *expr, ssize_t ssaidx_
         };
         jl_cgval_t meth = mark_julia_type(
             ctx,
-            ctx.builder.CreateCall(prepare_call(jlmethod_func), makeArrayRef(mdargs)),
+            ctx.builder.CreateCall(prepare_call(jlmethod_func), ArrayRef<Value*>(mdargs)),
             true,
             jl_method_type);
         return meth;
@@ -7060,7 +7132,7 @@ static jl_returninfo_t get_specsig_function(jl_codectx_t &ctx, Module *M, Value 
             fsig.push_back(AT->getPointerTo());
             argnames.push_back("union_bytes_return");
             Type *pair[] = { ctx.types().T_prjlvalue, getInt8Ty(ctx.builder.getContext()) };
-            rt = StructType::get(ctx.builder.getContext(), makeArrayRef(pair));
+            rt = StructType::get(ctx.builder.getContext(), ArrayRef<Type*>(pair));
         }
         else if (allunbox) {
             props.cc = jl_returninfo_t::Ghosts;
@@ -8597,9 +8669,7 @@ static jl_llvm_functions_t
                 // Can't use `llvm::SplitCriticalEdge` here because
                 // we may have invalid phi nodes in the destination.
                 BasicBlock *NewBB = BasicBlock::Create(terminator->getContext(),
-                   FromBB->getName() + "." + PhiBB->getName() + "_crit_edge");
-                Function::iterator FBBI = FromBB->getIterator();
-                ctx.f->getBasicBlockList().insert(++FBBI, NewBB); // insert after existing block
+                   FromBB->getName() + "." + PhiBB->getName() + "_crit_edge", FromBB->getParent(), FromBB->getNextNode()); // insert after existing block
                 terminator->replaceSuccessorWith(PhiBB, NewBB);
                 DebugLoc Loc = terminator->getDebugLoc();
                 terminator = BranchInst::Create(PhiBB);
@@ -9283,8 +9353,12 @@ extern "C" void jl_init_llvm(void)
     initializeAnalysis(Registry);
     initializeTransformUtils(Registry);
     initializeInstCombine(Registry);
+#if JL_LLVM_VERSION >= 160000
+    // TODO
+#else
     initializeAggressiveInstCombine(Registry);
     initializeInstrumentation(Registry);
+#endif
     initializeTarget(Registry);
 #ifdef USE_POLLY
     polly::initializePollyPasses(Registry);
