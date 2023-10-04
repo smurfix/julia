@@ -12,14 +12,16 @@ struct InliningTodo
     mi::MethodInstance
     # The IR of the inlinee
     ir::IRCode
+    # The DebugInfo table for the inlinee
+    di::DebugInfo
     # If the function being inlined is a single basic block we can use a
     # simpler inlining algorithm. This flag determines whether that's allowed
     linear_inline_eligible::Bool
     # Effects of the call statement
     effects::Effects
 end
-function InliningTodo(mi::MethodInstance, ir::IRCode, effects::Effects)
-    return InliningTodo(mi, ir, linear_inline_eligible(ir), effects)
+function InliningTodo(mi::MethodInstance, (ir, di)::Tuple{IRCode, DebugInfo}, effects::Effects)
+    return InliningTodo(mi, ir, di, linear_inline_eligible(ir), effects)
 end
 
 struct ConstantCase
@@ -298,69 +300,31 @@ function finish_cfg_inline!(state::CFGInliningState)
     end
 end
 
-# duplicated from IRShow
-function normalize_method_name(m)
-    if m isa Method
-        return m.name
-    elseif m isa MethodInstance
-        return (m.def::Method).name
-    elseif m isa Symbol
-        return m
-    else
-        return Symbol("")
-    end
-end
-@noinline method_name(m::LineInfoNode) = normalize_method_name(m.method)
-
-inline_node_is_duplicate(topline::LineInfoNode, line::LineInfoNode) =
-    topline.module === line.module &&
-    method_name(topline) === method_name(line) &&
-    topline.file === line.file &&
-    topline.line === line.line
-
-function ir_inline_linetable!(linetable::Vector{LineInfoNode}, inlinee_ir::IRCode,
-                              inlinee::MethodInstance, inlined_at::Int32)
-    inlinee_def = inlinee.def::Method
-    coverage = coverage_enabled(inlinee_def.module)
-    linetable_offset::Int32 = length(linetable)
-    # Append the linetable of the inlined function to our line table
-    topline::Int32 = linetable_offset + Int32(1)
-    coverage_by_path = JLOptions().code_coverage == 3
-    push!(linetable, LineInfoNode(inlinee_def.module, inlinee_def.name, inlinee_def.file, inlinee_def.line, inlined_at))
-    oldlinetable = inlinee_ir.linetable
-    extra_coverage_line = zero(Int32)
-    for oldline in eachindex(oldlinetable)
-        entry = oldlinetable[oldline]
-        if !coverage && coverage_by_path && is_file_tracked(entry.file)
-            # include topline coverage entry if in path-specific coverage mode, and any file falls under path
-            coverage = true
+function ir_inline_linetable!(debuginfo::DebugInfoStream, inlinee_debuginfo::DebugInfo, inlinee::MethodInstance)
+    # Append the linetable of the inlined function to our edges table
+    extra_coverage_line = false
+    linetable_offset = 1
+    while true
+        if linetable_offset > length(debuginfo.edges)
+            push!(debuginfo.edges, inlinee_debuginfo)
+            break
+        elseif debuginfo.edges[linetable_offset] === inlinee_debuginfo
+            break
         end
-        newentry = LineInfoNode(entry.module, entry.method, entry.file, entry.line,
-            (entry.inlined_at > 0 ? entry.inlined_at + linetable_offset + (oldline == 1) : inlined_at))
-        if oldline == 1
-            # check for a duplicate on the first iteration (likely true)
-            if inline_node_is_duplicate(linetable[topline], newentry)
-                continue
-            else
-                linetable_offset += 1
-            end
-        end
-        push!(linetable, newentry)
+        linetable_offset += 1
     end
-    if coverage && inlinee_ir.stmts[1][:line] + linetable_offset != topline
-        extra_coverage_line = topline
-    end
-    return linetable_offset, extra_coverage_line
+    return Int32(linetable_offset), extra_coverage_line
 end
 
 function ir_prepare_inlining!(insert_node!::Inserter, inline_target::Union{IRCode, IncrementalCompact},
-                              ir::IRCode, mi::MethodInstance, inlined_at::Int32, argexprs::Vector{Any})
+                              ir::IRCode, di::DebugInfo, mi::MethodInstance, inlined_at::Int32, argexprs::Vector{Any})
     def = mi.def::Method
-    linetable = inline_target isa IRCode ? inline_target.linetable : inline_target.ir.linetable
-    topline::Int32 = length(linetable) + Int32(1)
-    linetable_offset, extra_coverage_line = ir_inline_linetable!(linetable, ir, mi, inlined_at)
-    if extra_coverage_line != 0
-        insert_node!(NewInstruction(Expr(:code_coverage_effect), Nothing, extra_coverage_line))
+    debuginfo = inline_target isa IRCode ? inline_target.debuginfo : inline_target.ir.debuginfo
+
+    linetable_offset, extra_coverage_line = ir_inline_linetable!(debuginfo, di, mi)
+    topline = (inlined_at, linetable_offset, Int32(0))
+    if extra_coverage_line
+        insert_node!(NewInstruction(Expr(:code_coverage_effect), Nothing, topline))
     end
     spvals_ssa = nothing
     if !validate_sparams(mi.sparam_vals)
@@ -380,7 +344,7 @@ function ir_prepare_inlining!(insert_node!::Inserter, inline_target::Union{IRCod
             NewInstruction(Expr(:call, GlobalRef(Core, :getfield), argexprs[1], QuoteNode(:captures)),
             ir.argtypes[1], topline))
     end
-    return SSASubstitute(mi, argexprs, spvals_ssa, linetable_offset)
+    return SSASubstitute(mi, argexprs, spvals_ssa, (inlined_at, linetable_offset))
 end
 
 function adjust_boundscheck!(inline_compact::IncrementalCompact, idx′::Int, stmt::Expr, boundscheck::Symbol)
@@ -396,13 +360,12 @@ function ir_inline_item!(compact::IncrementalCompact, idx::Int, argexprs::Vector
                          item::InliningTodo, boundscheck::Symbol, todo_bbs::Vector{Tuple{Int, Int}})
     # Ok, do the inlining here
     inlined_at = compact.result[idx][:line]
-
-    ssa_substitute = ir_prepare_inlining!(InsertHere(compact), compact, item.ir, item.mi, inlined_at, argexprs)
-
+    @assert inlined_at[2] == 0 "already inlined this instruction"
+    ssa_substitute = ir_prepare_inlining!(InsertHere(compact), compact, item.ir, item.di, item.mi, inlined_at[1], argexprs)
     boundscheck = has_flag(compact.result[idx], IR_FLAG_INBOUNDS) ? :off : boundscheck
 
     # If the iterator already moved on to the next basic block,
-    # temporarily re-open in again.
+    # temporarily re-open it again.
     local return_value
     # Special case inlining that maintains the current basic block if there's only one BB in the target
     new_new_offset = length(compact.new_new_nodes)
@@ -410,14 +373,16 @@ function ir_inline_item!(compact::IncrementalCompact, idx::Int, argexprs::Vector
     if item.linear_inline_eligible
         #compact[idx] = nothing
         inline_compact = IncrementalCompact(compact, item.ir, compact.result_idx)
-        for ((_, idx′), stmt′) in inline_compact
+        @assert isempty(inline_compact.perm) && isempty(inline_compact.pending_perm) "linetable not in canonical form (missing compact call)"
+        for ((lineidx, idx′), stmt′) in inline_compact
             # This dance is done to maintain accurate usage counts in the
             # face of rename_arguments! mutating in place - should figure out
             # something better eventually.
             inline_compact[idx′] = nothing
+            # alter the line number information for InsertBefore to point to the current instruction in the new linetable
+            inline_compact[SSAValue(idx′)][:line] = (ssa_substitute.inlined_at[1], ssa_substitute.inlined_at[2], Int32(lineidx))
             insert_node! = InsertBefore(inline_compact, SSAValue(idx′))
-            stmt′ = ssa_substitute!(insert_node!, inline_compact[SSAValue(idx′)], stmt′,
-                                    ssa_substitute)
+            stmt′ = ssa_substitute_op!(insert_node!, inline_compact[SSAValue(idx′)], stmt′, ssa_substitute)
             if isa(stmt′, ReturnNode)
                 val = stmt′.val
                 return_value = SSAValue(idx′)
@@ -444,11 +409,12 @@ function ir_inline_item!(compact::IncrementalCompact, idx::Int, argexprs::Vector
         pn = PhiNode()
         #compact[idx] = nothing
         inline_compact = IncrementalCompact(compact, item.ir, compact.result_idx)
-        for ((_, idx′), stmt′) in inline_compact
+        @assert isempty(inline_compact.perm) && isempty(inline_compact.pending_perm) "linetable not in canonical form (missing compact call)"
+        for ((lineidx, idx′), stmt′) in inline_compact
             inline_compact[idx′] = nothing
+            inline_compact[SSAValue(idx′)][:line] = (ssa_substitute.inlined_at[1], ssa_substitute.inlined_at[2], Int32(lineidx))
             insert_node! = InsertBefore(inline_compact, SSAValue(idx′))
-            stmt′ = ssa_substitute!(insert_node!, inline_compact[SSAValue(idx′)], stmt′,
-                                    ssa_substitute)
+            stmt′ = ssa_substitute_op!(insert_node!, inline_compact[SSAValue(idx′)], stmt′, ssa_substitute)
             if isa(stmt′, ReturnNode)
                 if isdefined(stmt′, :val)
                     val = stmt′.val
@@ -484,7 +450,7 @@ function ir_inline_item!(compact::IncrementalCompact, idx::Int, argexprs::Vector
 end
 
 function fix_va_argexprs!(insert_node!::Inserter, inline_target::Union{IRCode, IncrementalCompact},
-    argexprs::Vector{Any}, nargs_def::Int, line_idx::Int32)
+    argexprs::Vector{Any}, nargs_def::Int, line_idx::NTuple{3,Int32})
     newargexprs = argexprs[1:(nargs_def-1)]
     tuple_call = Expr(:call, TOP_TUPLE)
     tuple_typs = Any[]
@@ -838,7 +804,7 @@ function compileable_specialization(match::MethodMatch, effects::Effects,
 end
 
 struct InferredResult
-    src::Any
+    src::Any # CodeInfo or IRCode
     effects::Effects
     InferredResult(@nospecialize(src), effects::Effects) = new(src, effects)
 end
@@ -849,11 +815,9 @@ end
             # in this case function can be inlined to a constant
             return ConstantCase(quoted(code.rettype_const))
         end
-        src = @atomic :monotonic code.inferred
-        effects = decode_effects(code.ipo_purity_bits)
-        return InferredResult(src, effects)
+        return code
     end
-    return InferredResult(nothing, Effects())
+    return nothing
 end
 @inline function get_local_result(inf_result::InferenceResult)
     effects = inf_result.ipo_effects
@@ -887,7 +851,15 @@ function resolve_todo(mi::MethodInstance, result::Union{Nothing,InferenceResult,
         add_inlining_backedge!(et, mi)
         return inferred_result
     end
-    (; src, effects) = inferred_result
+    if inferred_result isa InferredResult
+        (; src, effects) = inferred_result
+    elseif inferred_result isa CodeInstance
+        src = @atomic :monotonic inferred_result.inferred
+        effects = decode_effects(inferred_result.ipo_purity_bits)
+    else
+        src = nothing
+        effects = Effects()
+    end
 
     # the duplicated check might have been done already within `analyze_method!`, but still
     # we need it here too since we may come here directly using a constant-prop' result
@@ -896,12 +868,13 @@ function resolve_todo(mi::MethodInstance, result::Union{Nothing,InferenceResult,
             compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
     end
 
-    src = inlining_policy(state.interp, src, info, flag)
-    src === nothing && return compileable_specialization(mi, effects, et, info;
-        compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
+    inlining_policy(state.interp, src, info, flag) ||
+        return compileable_specialization(mi, effects, et, info;
+            compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
 
     add_inlining_backedge!(et, mi)
-    ir = retrieve_ir_for_inlining(mi, src, preserve_local_sources)
+    ir = inferred_result isa CodeInstance  ? retrieve_ir_for_inlining(inferred_result, src) :
+                                             retrieve_ir_for_inlining(mi, src, preserve_local_sources)
     return InliningTodo(mi, ir, effects)
 end
 
@@ -919,14 +892,21 @@ function resolve_todo(mi::MethodInstance, @nospecialize(info::CallInfo), flag::U
         add_inlining_backedge!(et, mi)
         return cached_result
     end
-    (; src, effects) = cached_result
+    if cached_result isa InferredResult
+        (; src, effects) = cached_result
+    elseif cached_result isa CodeInstance
+        src = @atomic :monotonic cached_result.inferred
+        effects = decode_effects(cached_result.ipo_purity_bits)
+    else
+        src = nothing
+        effects = Effects()
+    end
 
-    src = inlining_policy(state.interp, src, info, flag)
-
-    src === nothing && return nothing
-
+    inlining_policy(state.interp, src, info, flag) || return nothing
+    ir = cached_result isa CodeInstance  ? retrieve_ir_for_inlining(cached_result, src) :
+                                           retrieve_ir_for_inlining(mi, src, preserve_local_sources)
     add_inlining_backedge!(et, mi)
-    return InliningTodo(mi, retrieve_ir_for_inlining(mi, src), effects)
+    return InliningTodo(mi, ir, effects)
 end
 
 function validate_sparams(sparams::SimpleVector)
@@ -979,21 +959,22 @@ function analyze_method!(match::MethodMatch, argtypes::Vector{Any},
     return resolve_todo(mi, volatile_inf_result, info, flag, state; invokesig)
 end
 
-function retrieve_ir_for_inlining(mi::MethodInstance, src::String, ::Bool=true)
-    src = _uncompressed_ir(mi.def, src)
-    return inflate_ir!(src, mi)
+function retrieve_ir_for_inlining(cached_result::CodeInstance, src::MaybeCompressed)
+    src = _uncompressed_ir(cached_result, src)::CodeInfo
+    return inflate_ir!(src, cached_result.def), src.debuginfo
 end
-function retrieve_ir_for_inlining(mi::MethodInstance, src::CodeInfo, preserve_local_sources::Bool=true)
+function retrieve_ir_for_inlining(mi::MethodInstance, src::CodeInfo, preserve_local_sources::Bool)
     if preserve_local_sources
         src = copy(src)
     end
-    return inflate_ir!(src, mi)
+    return inflate_ir!(src, mi), src.debuginfo
 end
-function retrieve_ir_for_inlining(::MethodInstance, ir::IRCode, preserve_local_sources::Bool=true)
+function retrieve_ir_for_inlining(mi::MethodInstance, ir::IRCode, preserve_local_sources::Bool)
     if preserve_local_sources
         ir = copy(ir)
     end
-    return ir
+    ir.debuginfo.def = mi
+    return ir, DebugInfo(ir.debuginfo, length(ir.stmts))
 end
 
 function flags_for_effects(effects::Effects)
@@ -1525,13 +1506,13 @@ function semiconcrete_result_item(result::SemiConcreteResult,
         return compileable_specialization(mi, result.effects, et, info;
             compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
     end
-    ir = inlining_policy(state.interp, result.ir, info, flag)
-    ir === nothing && return compileable_specialization(mi, result.effects, et, info;
-        compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
+    inlining_policy(state.interp, result.ir, info, flag) ||
+        return compileable_specialization(mi, result.effects, et, info;
+            compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
 
     add_inlining_backedge!(et, mi)
     preserve_local_sources = OptimizationParams(state.interp).preserve_local_sources
-    ir = retrieve_ir_for_inlining(mi, ir, preserve_local_sources)
+    ir = retrieve_ir_for_inlining(mi, result.ir, preserve_local_sources)
     return InliningTodo(mi, ir, result.effects)
 end
 
@@ -1842,13 +1823,7 @@ struct SSASubstitute
     mi::MethodInstance
     arg_replacements::Vector{Any}
     spvals_ssa::Union{Nothing,SSAValue}
-    linetable_offset::Int32
-end
-
-function ssa_substitute!(insert_node!::Inserter, subst_inst::Instruction, @nospecialize(val),
-                         ssa_substitute::SSASubstitute)
-    subst_inst[:line] += ssa_substitute.linetable_offset
-    return ssa_substitute_op!(insert_node!, subst_inst, val, ssa_substitute)
+    inlined_at::NTuple{2,Int32} # TODO: add a map also, so that ssaidx doesn't need to equal inlined_idx?
 end
 
 function insert_spval!(insert_node!::Inserter, spvals_ssa::SSAValue, spidx::Int, do_isdefined::Bool)

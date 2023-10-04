@@ -447,7 +447,7 @@ function serialize(s::AbstractSerializer, meth::Method)
     serialize(s, meth.constprop)
     serialize(s, meth.purity)
     if isdefined(meth, :source)
-        serialize(s, Base._uncompressed_ast(meth, meth.source))
+        serialize(s, Base._uncompressed_ast(meth))
     else
         serialize(s, nothing)
     end
@@ -1085,6 +1085,7 @@ function deserialize(s::AbstractSerializer, ::Type{Method})
     end
     if makenew
         meth.module = mod
+        meth.debuginfo = NullDebugInfo
         meth.name = name
         meth.file = file
         meth.line = line
@@ -1097,7 +1098,9 @@ function deserialize(s::AbstractSerializer, ::Type{Method})
         meth.purity = purity
         if template !== nothing
             # TODO: compress template
-            meth.source = template::CodeInfo
+            template = template::CodeInfo
+            meth.source = template
+            meth.debuginfo = template.debuginfo
             if !@isdefined(slot_syms)
                 slot_syms = ccall(:jl_compress_argnames, Ref{String}, (Any,), meth.source.slotnames)
             end
@@ -1165,6 +1168,7 @@ function deserialize(s::AbstractSerializer, ::Type{CodeInfo})
     deserialize_cycle(s, ci)
     code = deserialize(s)::Vector{Any}
     ci.code = code
+    ci.debuginfo = NullDebugInfo
     # allow older-style IR with return and gotoifnot Exprs
     for i in 1:length(code)
         stmt = code[i]
@@ -1177,17 +1181,27 @@ function deserialize(s::AbstractSerializer, ::Type{CodeInfo})
             end
         end
     end
-    ci.codelocs = deserialize(s)::Vector{Int32}
+    _x = deserialize(s)
+    have_debuginfo = _x isa Core.DebugInfo
+    if have_debuginfo
+        ci.debuginfo = _x
+    else
+        codelocs = _x::Vector{Int32}
+        # TODO: convert codelocs to debuginfo format?
+    end
     _x = deserialize(s)
     if _x isa Array || _x isa Int
         pre_12 = false
-        ci.ssavaluetypes = _x
     else
         pre_12 = true
         # < v1.2
         ci.method_for_inference_limit_heuristics = _x
-        ci.ssavaluetypes = deserialize(s)
-        ci.linetable = deserialize(s)
+        _x = deserialize(s)
+    end
+    ci.ssavaluetypes = _x
+    if pre_12
+        linetable = deserialize(s)
+        # TODO: convert linetable to debuginfo format?
     end
     ssaflags = deserialize(s)
     if length(ssaflags) ≠ length(code)
@@ -1202,7 +1216,10 @@ function deserialize(s::AbstractSerializer, ::Type{CodeInfo})
         ci.slotflags = deserialize(s)
     else
         ci.method_for_inference_limit_heuristics = deserialize(s)
-        ci.linetable = deserialize(s)
+        if !have_debuginfo # pre v1.11 format
+            linetable = deserialize(s)
+            # TODO: convert linetable to debuginfo format?
+        end
     end
     ci.slotnames = deserialize(s)
     if !pre_12
@@ -1212,15 +1229,14 @@ function deserialize(s::AbstractSerializer, ::Type{CodeInfo})
         ci.parent = deserialize(s)
         world_or_edges = deserialize(s)
         pre_13 = isa(world_or_edges, Integer)
-        if pre_13
-            ci.min_world = world_or_edges
-        else
+        if !pre_13
             ci.edges = world_or_edges
-            ci.min_world = reinterpret(UInt, deserialize(s))
-            ci.max_world = reinterpret(UInt, deserialize(s))
+            world_or_edges = deserialize(s)::Integer
         end
+        ci.min_world = reinterpret(UInt, world_or_edges)
+        ci.max_world = reinterpret(UInt, deserialize(s))
     end
-    ci.inferred = deserialize(s)
+    ci.inferred = deserialize(s)::Bool
     if format_version(s) < 22
         inlining_cost = deserialize(s)
         if isa(inlining_cost, Bool)
@@ -1253,8 +1269,11 @@ function deserialize(s::AbstractSerializer, ::Type{CodeInfo})
     if format_version(s) >= 22
         ci.inlining_cost = deserialize(s)::UInt16
     end
+    ci.debuginfo = NullDebugInfo
     return ci
 end
+
+const NullDebugInfo = DebugInfo(:none)
 
 if Int === Int64
 const OtherInt = Int32

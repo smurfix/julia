@@ -1293,12 +1293,14 @@ function length(mt::Core.MethodTable)
 end
 isempty(mt::Core.MethodTable) = (mt.defs === nothing)
 
-uncompressed_ir(m::Method) = isdefined(m, :source) ? _uncompressed_ir(m, m.source) :
+uncompressed_ir(m::Method) = isdefined(m, :source) ? _uncompressed_ir(m) :
                              isdefined(m, :generator) ? error("Method is @generated; try `code_lowered` instead.") :
                              error("Code for this Method is not available.")
-_uncompressed_ir(m::Method, s::CodeInfo) = copy(s)
-_uncompressed_ir(m::Method, s::String) = ccall(:jl_uncompress_ir, Any, (Any, Ptr{Cvoid}, Any), m, C_NULL, s)::CodeInfo
-_uncompressed_ir(ci::Core.CodeInstance, s::String) = ccall(:jl_uncompress_ir, Any, (Any, Any, Any), ci.def.def::Method, ci, s)::CodeInfo
+function _uncompressed_ir(m::Method)
+    s = m.source
+    s isa String && (s = ccall(:jl_uncompress_ir, Any, (Any, Ptr{Cvoid}, Any), m, C_NULL, s))
+    return s::CodeInfo
+end
 # for backwards compat
 const uncompressed_ast = uncompressed_ir
 const _uncompressed_ast = _uncompressed_ir
@@ -1604,7 +1606,7 @@ function code_typed_opaque_closure(@nospecialize(oc::Core.OpaqueClosure);
     ccall(:jl_is_in_pure_context, Bool, ()) && error("code reflection cannot be used from generated functions")
     m = oc.source
     if isa(m, Method)
-        code = _uncompressed_ir(m, m.source)
+        code = _uncompressed_ir(m)
         debuginfo === :none && remove_linenums!(code)
         # intersect the declared return type and the inferred return type (if available)
         rt = typeintersect(code.rettype, typeof(oc).parameters[2])

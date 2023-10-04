@@ -790,6 +790,37 @@ static jl_value_t *jl_decode_value(jl_ircode_state *s) JL_GC_DISABLED
 
 typedef jl_value_t jl_string_t; // for local expressibility
 
+static size_t codelocs_parseheader(jl_string_t *cl, int *line_offset, int *line_bytes, int *to_bytes) JL_NOTSAFEPOINT
+{
+    if (jl_string_len(cl) == 0) {
+        *line_offset = *line_bytes = *to_bytes = 0;
+        return 0;
+    }
+    int32_t header[3];
+    memcpy(&header, (char*)jl_string_data(cl), sizeof(header));
+    *line_offset = header[0];
+    if (header[1] < 255)
+        *line_bytes = 1;
+    else if (header[1] < 65535)
+        *line_bytes = 2;
+    else
+        *line_bytes = 4;
+    if (header[2] == 0)
+        *to_bytes = 0;
+    else if (header[2] < 255)
+        *to_bytes = 1;
+    else if (header[2] < 65535)
+        *to_bytes = 2;
+    else
+        *to_bytes = 4;
+    return (jl_string_len(cl) - sizeof(header)) / (*line_bytes + *to_bytes * 2); // compute nstmts
+}
+static int codelocs_nstmts(jl_string_t *cl) JL_NOTSAFEPOINT
+{
+    int line_offset, line_bytes, to_bytes;
+    return codelocs_parseheader(cl, &line_offset, &line_bytes, &to_bytes);
+}
+
 #define IR_DATASIZE_FLAGS         sizeof(uint8_t)
 #define IR_DATASIZE_PURITY        sizeof(uint16_t)
 #define IR_DATASIZE_INLINING_COST sizeof(uint16_t)
@@ -806,8 +837,12 @@ JL_DLLEXPORT jl_string_t *jl_compress_ir(jl_method_t *m, jl_code_info_t *code)
 {
     JL_TIMING(AST_COMPRESS, AST_COMPRESS);
     JL_LOCK(&m->writelock); // protect the roots array (Might GC)
+    int isdef = code == NULL;
+    if (isdef)
+        code = (jl_code_info_t*)m->source;
     assert(jl_is_method(m));
     assert(jl_is_code_info(code));
+    assert(jl_array_nrows(code->code) == codelocs_nstmts(code->debuginfo->codelocs) || jl_string_len(code->debuginfo->codelocs) == 0);
     ios_t dest;
     ios_mem(&dest, 0);
     int en = jl_gc_enable(0); // Might GC
@@ -845,8 +880,8 @@ JL_DLLEXPORT jl_string_t *jl_compress_ir(jl_method_t *m, jl_code_info_t *code)
 
     for (i = 0; i < 6; i++) {
         int copy = 1;
-        if (i == 1) { // skip codelocs
-            assert(jl_field_offset(jl_code_info_type, i) == offsetof(jl_code_info_t, codelocs));
+        if (i == 1) { // skip debuginfo
+            assert(jl_field_offset(jl_code_info_type, i) == offsetof(jl_code_info_t, debuginfo));
             continue;
         }
         if (i == 4) { // don't copy contents of method_for_inference_limit_heuristics field
@@ -866,22 +901,6 @@ JL_DLLEXPORT jl_string_t *jl_compress_ir(jl_method_t *m, jl_code_info_t *code)
         jl_encode_value_(&s, (jl_value_t*)jl_compress_argnames(code->slotnames), 1);
     else
         jl_encode_value(&s, jl_nothing);
-
-    size_t nstmt = jl_array_nrows(code->code);
-    assert(nstmt == jl_array_nrows(code->codelocs));
-    if (jl_array_nrows(code->linetable) < 256) {
-        for (i = 0; i < nstmt; i++) {
-            write_uint8(s.s, jl_array_data(code->codelocs, int32_t)[i]);
-        }
-    }
-    else if (jl_array_nrows(code->linetable) < 65536) {
-        for (i = 0; i < nstmt; i++) {
-            write_uint16(s.s, jl_array_data(code->codelocs, int32_t)[i]);
-        }
-    }
-    else {
-        ios_write(s.s, (char*)jl_array_data(code->codelocs, int32_t), nstmt * sizeof(int32_t));
-    }
 
     write_uint8(s.s, s.relocatability);
 
@@ -937,7 +956,7 @@ JL_DLLEXPORT jl_code_info_t *jl_uncompress_ir(jl_method_t *m, jl_code_instance_t
     ios_readall(s.s, jl_array_data(code->slotflags, char), nslots);
 
     for (i = 0; i < 6; i++) {
-        if (i == 1)  // skip codelocs
+        if (i == 1)  // skip debuginfo
             continue;
         assert(jl_field_isptr(jl_code_info_type, i));
         jl_value_t **fld = (jl_value_t**)((char*)jl_data_ptr(code) + jl_field_offset(jl_code_info_type, i));
@@ -951,25 +970,16 @@ JL_DLLEXPORT jl_code_info_t *jl_uncompress_ir(jl_method_t *m, jl_code_instance_t
         slotnames = m->slot_syms;
     code->slotnames = jl_uncompress_argnames(slotnames);
 
-    size_t nstmt = jl_array_nrows(code->code);
-    code->codelocs = (jl_value_t*)jl_alloc_array_1d(jl_array_int32_type, nstmt);
-    if (jl_array_nrows(code->linetable) < 256) {
-        for (i = 0; i < nstmt; i++) {
-            jl_array_data(code->codelocs, int32_t)[i] = read_uint8(s.s);
-        }
-    }
-    else if (jl_array_nrows(code->linetable) < 65536) {
-        for (i = 0; i < nstmt; i++) {
-            jl_array_data(code->codelocs, int32_t)[i] = read_uint16(s.s);
-        }
-    }
-    else {
-        ios_readall(s.s, (char*)jl_array_data(code->codelocs, int32_t), nstmt * sizeof(int32_t));
-    }
+    if (metadata)
+        code->debuginfo = jl_atomic_load_relaxed(&metadata->debuginfo);
+    else
+        code->debuginfo = m->debuginfo;
+    assert(jl_array_nrows(code->code) == codelocs_nstmts(code->debuginfo->codelocs) || jl_string_len(code->debuginfo->codelocs) == 0);
 
     (void) read_uint8(s.s);   // relocatability
-
+    assert(!ios_eof(s.s));
     assert(ios_getc(s.s) == -1);
+
     ios_close(s.s);
     JL_GC_PUSH1(&code);
     jl_gc_enable(en);
@@ -1115,6 +1125,223 @@ JL_DLLEXPORT jl_value_t *jl_uncompress_argname_n(jl_value_t *syms, size_t i)
         remaining -= namelen + 1;
     }
     return jl_nothing;
+}
+
+// codelocs are compressed as follows:
+// The input vector is a NTuple{3,UInt32} (struct jl_codeloc_t)
+// The vector is scanned for min and max of the values for each element
+// The output is then allocated to hold (min-line, max-line, max-at) first, then line - min (in the smallest space), then the remainder (in the smallest space)
+static inline struct jl_codeloc_t unpack_codeloc(jl_string_t *cl, size_t pc, int line_offset, int line_bytes, int to_bytes) JL_NOTSAFEPOINT
+{
+    const char *ptr = jl_string_data(cl) + sizeof(int32_t[3]) + pc * (line_bytes + to_bytes * 2);
+    uint8_t int8;
+    uint16_t int16;
+    uint32_t int32;
+    struct jl_codeloc_t codeloc;
+    switch (line_bytes) {
+    case 0:
+        codeloc.line = 0;
+        break;
+    case 1:
+        memcpy(&int8, ptr, 1);
+        codeloc.line = int8;
+        break;
+    case 2:
+        memcpy(&int16, ptr, 2);
+        codeloc.line = int16;
+        break;
+    case 4:
+        memcpy(&int32, ptr, 4);
+        codeloc.line = int32;
+        break;
+    }
+    if (codeloc.line > 0)
+        codeloc.line += line_offset - 1;
+    ptr += line_bytes;
+    switch (to_bytes) {
+    case 0:
+        codeloc.to = 0;
+        break;
+    case 1:
+        memcpy(&int8, ptr, 1);
+        codeloc.to = int8;
+        break;
+    case 2:
+        memcpy(&int16, ptr, 2);
+        codeloc.to = int16;
+        break;
+    case 4:
+        memcpy(&int32, ptr, 4);
+        codeloc.to = int32;
+        break;
+    }
+    ptr += to_bytes;
+    switch (to_bytes) {
+    case 0:
+        codeloc.pc = 0;
+        break;
+    case 1:
+        memcpy(&int8, ptr, 1);
+        codeloc.pc = int8;
+        break;
+    case 2:
+        memcpy(&int16, ptr, 2);
+        codeloc.pc = int16;
+        break;
+    case 3:
+        memcpy(&int32, ptr, 4);
+        codeloc.pc = int32;
+        break;
+    }
+    ptr += to_bytes;
+    return codeloc;
+}
+
+
+static const struct jl_codeloc_t badloc = {-1, 0, 0};
+
+JL_DLLEXPORT struct jl_codeloc_t jl_uncompress1_codeloc(jl_string_t *cl, size_t pc) JL_NOTSAFEPOINT
+{
+    assert(jl_is_string(cl));
+    int line_offset, line_bytes, to_bytes;
+    size_t nstmts = codelocs_parseheader(cl, &line_offset, &line_bytes, &to_bytes);
+    if (pc >= nstmts)
+        return badloc;
+    return unpack_codeloc(cl, pc, line_offset, line_bytes, to_bytes);
+}
+
+static int allzero(jl_value_t *codelocs) JL_NOTSAFEPOINT
+{
+    int32_t *p = jl_array_data(codelocs,int32_t);
+    int32_t *pend = p + jl_array_nrows(codelocs);
+    do {
+        if (*p)
+            return 0;
+    } while (++p < pend);
+    return 1;
+}
+
+JL_DLLEXPORT jl_string_t *jl_compress_codelocs(jl_value_t *codelocs, size_t nstmts) // Vector{Int32} => Memory{UInt8}
+{
+    assert(jl_typeis(codelocs, jl_array_int32_type));
+    if (jl_array_nrows(codelocs) == 0)
+        nstmts = 0;
+    assert(nstmts * 3 == jl_array_nrows(codelocs));
+    if (allzero(codelocs))
+        return jl_an_empty_string;
+    struct jl_codeloc_t codeloc, min, max;
+    size_t i;
+    min.line = min.to = min.pc = INT32_MAX;
+    max.line = max.to = max.pc = 0;
+    for (i = 0; i < nstmts; i++) {
+        memcpy(&codeloc, jl_array_data(codelocs,int32_t) + 3 * i, sizeof(codeloc));
+#define SETMIN(x) if (codeloc.x < min.x) min.x = codeloc.x
+#define SETMAX(x) if (codeloc.x > max.x) max.x = codeloc.x
+        if (codeloc.line > 0)
+            SETMIN(line);
+        SETMAX(line);
+        SETMIN(to);
+        SETMAX(to);
+        SETMIN(pc);
+        SETMAX(pc);
+#undef SETMIN
+#undef SETMAX
+    }
+    int32_t header[3];
+    header[0] = min.line > max.line ? 0 : min.line;
+    header[1] = min.line > max.line ? 0 : max.line - min.line;
+    header[2] = max.to > max.pc ? max.to : max.pc;
+    size_t line_bytes;
+    if (header[1] < 255)
+        line_bytes = 1;
+    else if (header[1] < 65535)
+        line_bytes = 2;
+    else
+        line_bytes = 4;
+    size_t to_bytes;
+    if (header[2] == 0)
+        to_bytes = 0;
+    else if (header[2] < 255)
+        to_bytes = 1;
+    else if (header[2] < 65535)
+        to_bytes = 2;
+    else
+        to_bytes = 4;
+    jl_string_t *cl = jl_alloc_string(nstmts * (line_bytes + to_bytes * 2) + sizeof(header));
+    // store header structure
+    memcpy(jl_string_data(cl), &header, sizeof(header));
+    // pack bytes
+    char *ptr = jl_string_data(cl) + sizeof(header);
+    uint8_t int8;
+    uint16_t int16;
+    uint32_t int32;
+    for (i = 0; i < nstmts; i++) {
+        memcpy(&codeloc, jl_array_data(codelocs,int32_t) + 3 * i, sizeof(codeloc));
+        int8 = int16 = int32 = codeloc.line > 0 ? codeloc.line - header[0] + 1 : 0;
+        switch (line_bytes) {
+        case 0:
+            break;
+        case 1:
+            memcpy(ptr, &int8, 1);
+            break;
+        case 2:
+            memcpy(ptr, &int16, 2);
+            break;
+        case 4:
+            memcpy(ptr, &int32, 4);
+            break;
+        }
+        ptr += line_bytes;
+        int8 = int16 = int32 = codeloc.to;
+        switch (to_bytes) {
+        case 0:
+            break;
+        case 1:
+            memcpy(ptr, &int8, 1);
+            break;
+        case 2:
+            memcpy(ptr, &int16, 2);
+            break;
+        case 4:
+            memcpy(ptr, &int32, 4);
+            break;
+        }
+        ptr += to_bytes;
+        int8 = int16 = int32 = codeloc.pc;
+        switch (to_bytes) {
+        case 0:
+            break;
+        case 1:
+            memcpy(ptr, &int8, 1);
+            break;
+        case 2:
+            memcpy(ptr, &int16, 2);
+            break;
+        case 4:
+            memcpy(ptr, &int32, 4);
+            break;
+        }
+        ptr += to_bytes;
+    }
+    return cl;
+}
+
+JL_DLLEXPORT jl_value_t *jl_uncompress_codelocs(jl_string_t *cl, size_t nstmts) // Memory{UInt8} => Vector{Int32}
+{
+    assert(jl_is_string(cl));
+    int line_offset, line_bytes, to_bytes;
+    size_t nlocs = codelocs_parseheader(cl, &line_offset, &line_bytes, &to_bytes);
+    assert(nlocs == 0 || nlocs == nstmts);
+    jl_value_t *codelocs = (jl_value_t*)jl_alloc_array_1d(jl_array_int32_type, nstmts * 3);
+    size_t i;
+    for (i = 0; i < nlocs; i++) {
+        struct jl_codeloc_t codeloc = unpack_codeloc(cl, i, line_offset, line_bytes, to_bytes);;
+        memcpy(jl_array_data(codelocs,int32_t) + i * 3, &codeloc, sizeof(codeloc));
+    }
+    if (nlocs == 0) {
+        memset(jl_array_data(codelocs,int32_t), 0, nstmts * sizeof(struct jl_codeloc_t));
+    }
+    return codelocs;
 }
 
 void jl_init_serializer(void)

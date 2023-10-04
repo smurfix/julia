@@ -450,21 +450,16 @@ function should_insert_coverage(mod::Module, src::CodeInfo)
     coverage_enabled(mod) && return true
     JLOptions().code_coverage == 3 || return false
     # path-specific coverage mode: if any line falls in a tracked file enable coverage for all
-    linetable = src.linetable
-    if isa(linetable, Vector{Any})
-        for line in linetable
-            line = line::LineInfoNode
-            if is_file_tracked(line.file)
-                return true
-            end
-        end
-    elseif isa(linetable, Vector{LineInfoNode})
-        for line in linetable
-            if is_file_tracked(line.file)
-                return true
-            end
-        end
-    end
+    return should_insert_coverage(src.debuginfo)
+end
+should_insert_coverage(mod::Symbol) = is_file_tracked(mod)
+should_insert_coverage(mod::Method) = should_insert_coverage(mod.file)
+should_insert_coverage(mod::MethodInstance) = should_insert_coverage(mod.def)
+should_insert_coverage(mod::Module) = false
+function should_insert_coverage(info::DebugInfo)
+    linetable = info.linetable
+    linetable === nothing || (should_insert_coverage(should_insert_coverage) && return true)
+    should_insert_coverage(info.def) && return true
     return false
 end
 
@@ -772,7 +767,7 @@ function IRInterpretationState(interp::AbstractInterpreter,
     @assert code.def === mi
     src = @atomic :monotonic code.inferred
     if isa(src, String)
-        src = _uncompressed_ir(mi.def, src)
+        src = _uncompressed_ir(code, src)
     else
         isa(src, CodeInfo) || return nothing
     end

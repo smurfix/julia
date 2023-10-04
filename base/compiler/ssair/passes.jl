@@ -1359,12 +1359,11 @@ function try_inline_finalizer!(ir::IRCode, argexprs::Vector{Any}, idx::Int,
         end
         src = @atomic :monotonic code.inferred
     else
-        src = nothing
+        return false
     end
 
-    src = inlining_policy(inlining.interp, src, info, IR_FLAG_NULL)
-    src === nothing && return false
-    src = retrieve_ir_for_inlining(mi, src)
+    inlining_policy(inlining.interp, src, info, IR_FLAG_NULL) || return false
+    src, di = retrieve_ir_for_inlining(code, src)
 
     # For now: Require finalizer to only have one basic block
     length(src.cfg.blocks) == 1 || return false
@@ -1373,8 +1372,8 @@ function try_inline_finalizer!(ir::IRCode, argexprs::Vector{Any}, idx::Int,
     add_inlining_backedge!(et, mi)
 
     # TODO: Should there be a special line number node for inlined finalizers?
-    inlined_at = ir[SSAValue(idx)][:line]
-    ssa_substitute = ir_prepare_inlining!(InsertBefore(ir, SSAValue(idx)), ir, src, mi, inlined_at, argexprs)
+    inline_at = ir[SSAValue(idx)][:line][1]
+    ssa_substitute = ir_prepare_inlining!(InsertBefore(ir, SSAValue(idx)), ir, src, di, mi, inline_at, argexprs)
 
     # TODO: Use the actual inliner here rather than open coding this special purpose inliner.
     ssa_rename = Vector{Any}(undef, length(src.stmts))
@@ -1387,7 +1386,7 @@ function try_inline_finalizer!(ir::IRCode, argexprs::Vector{Any}, idx::Int,
         end
         stmt′ = ssa_substitute_op!(InsertBefore(ir, SSAValue(idx)), inst, stmt′, ssa_substitute)
         ssa_rename[idx′] = insert_node!(ir, idx,
-            NewInstruction(inst; stmt=stmt′, line=inst[:line]+ssa_substitute.linetable_offset),
+            NewInstruction(inst; stmt=stmt′, line=(ssa_substitute.inlined_at[1], ssa_substitute.inlined_at[2], Int32(idx′))),
             attach_after)
     end
 

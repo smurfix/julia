@@ -1337,8 +1337,9 @@ function show_mi(io::IO, l::Core.MethodInstance, from_stackframe::Bool=false)
         # added by other means.  But if it isn't, then we should try
         # to print a little more identifying information.
         if !from_stackframe
-            linetable = l.uninferred.linetable
-            line = isempty(linetable) ? "unknown" : (lt = linetable[1]::Union{LineNumberNode,Core.LineInfoNode}; string(lt.file, ':', lt.line))
+            di = mi.uninferred.debuginfo
+            file, line = string(IRShow.debuginfo_file(di)), IRShow.debuginfo_firstline(di)
+            line = isempty(file) || line < 0 ? "<unknown>" : "$file:$line"
             print(io, " from ", def, " starting at ", line)
         end
     end
@@ -1361,8 +1362,9 @@ function show(io::IO, mi_info::Core.Compiler.Timings.InferenceFrameInfo)
             show_tuple_as_call(io, def.name, mi.specTypes; argnames, qualified=true)
         end
     else
-        linetable = mi.uninferred.linetable
-        line = isempty(linetable) ? "" : (lt = linetable[1]; string(lt.file, ':', lt.line))
+        di = mi.uninferred.debuginfo
+        file, line = string(IRShow.debuginfo_file(di)), IRShow.debuginfo_firstline(di)
+        line = isempty(file) || line < 0 ? "<unknown>" : "$file:$line"
         print(io, "Toplevel InferenceFrameInfo thunk from ", def, " starting at ", line)
     end
 end
@@ -2803,7 +2805,7 @@ module IRShow
     import ..Base
     import .Compiler: IRCode, CFG, scan_ssa_use!,
         isexpr, compute_basic_blocks, block_for_inst, IncrementalCompact,
-        Effects, ALWAYS_TRUE, ALWAYS_FALSE
+        Effects, ALWAYS_TRUE, ALWAYS_FALSE, DebugInfoStream, getdebugidx
     Base.getindex(r::Compiler.StmtRange, ind::Integer) = Compiler.getindex(r, ind)
     Base.size(r::Compiler.StmtRange) = Compiler.size(r)
     Base.first(r::Compiler.StmtRange) = Compiler.first(r)
@@ -2816,9 +2818,9 @@ module IRShow
     include("compiler/ssair/show.jl")
 
     const __debuginfo = Dict{Symbol, Any}(
-        # :full => src -> Base.IRShow.statementidx_lineinfo_printer(src), # and add variable slot information
-        :source => src -> Base.IRShow.statementidx_lineinfo_printer(src),
-        # :oneliner => src -> Base.IRShow.statementidx_lineinfo_printer(Base.IRShow.PartialLineInfoPrinter, src),
+        # :full => src -> statementidx_lineinfo_printer(src), # and add variable slot information
+        :source => src -> statementidx_lineinfo_printer(src),
+        # :oneliner => src -> statementidx_lineinfo_printer(PartialLineInfoPrinter, src),
         :none => src -> Base.IRShow.lineinfo_disabled,
         )
     const default_debuginfo = Ref{Symbol}(:none)
@@ -2832,18 +2834,11 @@ function show(io::IO, src::CodeInfo; debuginfo::Symbol=:source)
     if src.slotnames !== nothing
         lambda_io = IOContext(lambda_io, :SOURCE_SLOTNAMES => sourceinfo_slotnames(src))
     end
-    if isempty(src.linetable) || src.linetable[1] isa LineInfoNode
-        println(io)
-        # TODO: static parameter values?
-        # only accepts :source or :none, we can't have a fallback for default since
-        # that would break code_typed(, debuginfo=:source) iff IRShow.default_debuginfo[] = :none
-        IRShow.show_ir(lambda_io, src, IRShow.IRShowConfig(IRShow.__debuginfo[debuginfo](src)))
-    else
-        # this is a CodeInfo that has not been used as a method yet, so its locations are still LineNumberNodes
-        body = Expr(:block)
-        body.args = src.code
-        show(lambda_io, body)
-    end
+    println(io)
+    # TODO: static parameter values?
+    # only accepts :source or :none, we can't have a fallback for default since
+    # that would break code_typed(, debuginfo=:source) iff IRShow.default_debuginfo[] = :none
+    IRShow.show_ir(lambda_io, src, IRShow.IRShowConfig(IRShow.__debuginfo[debuginfo](src)))
     print(io, ")")
 end
 

@@ -247,6 +247,8 @@ end
 # constructing an opaque closure from IRCode
 let src = first(only(code_typed(+, (Int, Int))))
     ir = Core.Compiler.inflate_ir(src)
+    @test ir.debuginfo.def === nothing
+    ir.debuginfo.def = Symbol(@__FILE__)
     @test OpaqueClosure(src)(40, 2) == 42
     oc = OpaqueClosure(ir)
     @test oc(40, 2) == 42
@@ -271,6 +273,8 @@ let src = code_typed((Int,Int)) do x, y...
         @test_throws MethodError oc(1,2,3)
     end
     ir = Core.Compiler.inflate_ir(src)
+    @test ir.debuginfo.def === nothing
+    ir.debuginfo.def = Symbol(@__FILE__)
     let oc = OpaqueClosure(ir; isva=true)
         @test oc(1,2) === (1,(2,))
         @test_throws MethodError oc(1,2,3)

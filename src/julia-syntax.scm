@@ -4996,10 +4996,10 @@ f(x) = yt(x)
        ,@(cdddr lam))))
 
 (define (make-lineinfo name file line (inlined-at #f))
-  `(lineinfo (thismodule) ,(if inlined-at '|macro expansion| name) ,file ,line ,(or inlined-at 0)))
+  `(lineinfo ,(if inlined-at '|macro expansion| name) ,file ,line ,(or inlined-at 0)))
 
 (define (set-lineno! lineinfo num)
-  (set-car! (cddddr lineinfo) num))
+  (set-car! (cdddr lineinfo) num))
 
 (define (compact-ir body name file line)
   (let ((code         '(block))

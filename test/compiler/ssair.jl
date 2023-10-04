@@ -116,8 +116,9 @@ let cfg = CFG(BasicBlock[
     make_bb([0, 1, 2] , [5]   ), # 0 predecessor should be preserved
     make_bb([2, 3]    , []    ),
 ], Int[])
-    insts = Compiler.InstructionStream([], [], Any[], Int32[], UInt8[])
-    ir = Compiler.IRCode(insts, cfg, Core.LineInfoNode[], Any[], Expr[], Compiler.VarState[])
+    insts = Compiler.InstructionStream([], [], Core.Compiler.CallInfo[], Int32[], UInt32[])
+    di = Compiler.DebugInfoStream(nothing, nothing, Any[], insts.line)
+    ir = Compiler.IRCode(insts, cfg, di, Any[], Expr[], Compiler.VarState[])
     compact = Compiler.IncrementalCompact(ir, true)
     @test length(compact.cfg_transform.result_bbs) == 4 && 0 in compact.cfg_transform.result_bbs[3].preds
 end

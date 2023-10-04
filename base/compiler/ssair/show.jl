@@ -141,17 +141,6 @@ function show_unquoted_gotoifnot(io::IO, stmt::GotoIfNot, indent::Int, prefix::S
     show_unquoted(io, stmt.cond, indent)
 end
 
-function compute_inlining_depth(linetable::Vector, iline::Int32)
-    iline == 0 && return 1
-    depth = -1
-    while iline != 0
-        depth += 1
-        lineinfo = linetable[iline]::LineInfoNode
-        iline = lineinfo.inlined_at
-    end
-    return depth
-end
-
 function should_print_ssa_type(@nospecialize node)
     if isa(node, Expr)
         return !(node.head in (:gc_preserve_begin, :gc_preserve_end, :meta, :leave))
@@ -167,32 +156,27 @@ function default_expr_type_printer(io::IO; @nospecialize(type), used::Bool, show
     return nothing
 end
 
-function normalize_method_name(m)
+function method_name(@nospecialize m)
+    if m isa LineInfoNode
+        m = m.method
+    end
+    if m isa MethodInstance
+        m = m.def
+    end
     if m isa Method
-        return m.name
-    elseif m isa MethodInstance
-        return (m.def::Method).name
-    elseif m isa Symbol
+        m = m.name
+    end
+    if m isa Module
+        return :var"top-level scope"
+    end
+    if m isa Symbol
         return m
-    else
-        return Symbol("")
     end
+    return :""
 end
-@noinline method_name(m::LineInfoNode) = normalize_method_name(m.method)
-
-# converts the linetable for line numbers
-# into a list in the form:
-#   1 outer-most-frame
-#   2   inlined-frame
-#   3     innermost-frame
-function compute_loc_stack(linetable::Vector, line::Int32)
-    stack = Int[]
-    while line != 0
-        entry = linetable[line]::LineInfoNode
-        pushfirst!(stack, line)
-        line = entry.inlined_at
-    end
-    return stack
+@noinline function normalize_method_name(@nospecialize m)
+    name = method_name(m)
+    return name === :"" ? :none : name
 end
 
 """
@@ -261,24 +245,22 @@ function compute_ir_line_annotations(code::IRCode)
     loc_lineno = String[]
     cur_group = 1
     last_lineno = 0
-    last_stack = Int[]
+    last_stack = LineInfoNode[] # nb. only file, line, and method are populated in this
     last_printed_depth = 0
-    linetable = code.linetable
-    lines = code.stmts.line
-    last_line = zero(eltype(lines))
-    for idx in 1:length(lines)
+    debuginfo = code.debuginfo
+    def = :var"unknown scope"
+    for idx in 1:length(code.stmts)
         buf = IOBuffer()
-        line = lines[idx]
         print(buf, "│")
-        depth = compute_inlining_depth(linetable, line)
-        iline = line
-        lineno = 0
+        stack = buildLineInfoNode(debuginfo, def, idx)
+        lineno::Int = 0
         loc_method = ""
-        if line != 0
-            stack = compute_loc_stack(linetable, line)
-            lineno = linetable[stack[1]].line
+        isempty(stack) && (stack = last_stack)
+        if !isempty(stack)
+            lineno = stack[1].line
             x = min(length(last_stack), length(stack))
-            if length(stack) != 0
+            depth = length(stack) - 1
+            if true
                 # Compute the last depth that was in common
                 first_mismatch = let last_stack=last_stack
                     findfirst(i->last_stack[i] != stack[i], 1:x)
@@ -286,7 +268,7 @@ function compute_ir_line_annotations(code::IRCode)
                 # If the first mismatch is the last stack frame, that might just
                 # be a line number mismatch in inner most frame. Ignore those
                 if length(last_stack) == length(stack) && first_mismatch == length(stack)
-                    last_entry, entry = linetable[last_stack[end]], linetable[stack[end]]
+                    last_entry, entry = last_stack[end], stack[end]
                     if method_name(last_entry) === method_name(entry) && last_entry.file === entry.file
                         first_mismatch = nothing
                     end
@@ -322,22 +304,15 @@ function compute_ir_line_annotations(code::IRCode)
                 end
                 print(buf, "╷"^max(0, depth - last_depth - stole_one))
                 if printing_depth != 0
-                    if length(stack) == printing_depth
-                        loc_method = line
-                    else
-                        loc_method = stack[printing_depth + 1]
-                    end
-                    loc_method = method_name(linetable[loc_method])
+                    loc_method = normalize_method_name(stack[printing_depth + 1])
                 end
                 loc_method = string(" "^printing_depth, loc_method)
             end
             last_stack = stack
-            entry = linetable[line]
         end
         push!(loc_annotations, String(take!(buf)))
         push!(loc_lineno, (lineno != 0 && lineno != last_lineno) ? string(lineno) : "")
         push!(loc_methods, loc_method)
-        last_line = line
         (lineno != 0) && (last_lineno = lineno)
         nothing
     end
@@ -346,19 +321,101 @@ end
 
 Base.show(io::IO, code::Union{IRCode, IncrementalCompact}) = show_ir(io, code)
 
+# A line_info_preprinter for disabling line info printing
 lineinfo_disabled(io::IO, linestart::String, idx::Int) = ""
 
-function DILineInfoPrinter(linetable::Vector, showtypes::Bool=false)
+# utility function to extract the file name from a DebugInfo object
+function debuginfo_file1(debuginfo::Union{Core.DebugInfo,DebugInfoStream})
+    def = debuginfo.def
+    if def isa MethodInstance
+        def = def.def
+    end
+    if def isa Method
+        def = def.file
+    end
+    if def isa Symbol
+        return def
+    end
+    return :var"<unknown>"
+end
+
+# utility function to extract the file name from a DebugInfo object
+function debuginfo_file(debuginfo::Union{Core.DebugInfo,DebugInfoStream})
+    linetable = debuginfo.linetable
+    while linetable != nothing
+        debuginfo = linetable
+        linetable = debuginfo.linetable
+    end
+    return debuginfo_file1(debuginfo)
+end
+
+# utility function to extract the first line number of a block of code (corresponding to debuginfo_file)
+function debuginfo_firstline(debuginfo::Union{Core.DebugInfo,DebugInfoStream})
+    linetable = debuginfo.linetable
+    while linetable != nothing
+        debuginfo = linetable
+        linetable = debuginfo.linetable
+    end
+    codeloc = getdebugidx(debuginfo, 1)
+    return codeloc[1]
+end
+
+## utility function to extract the line number at a particular program counter (ignoring inlining)
+## corresponds to debuginfo_file
+#function debuginfo_line(debuginfo::Union{Core.DebugInfo,DebugInfoStream}, pc::Int)
+#    while pc > 0
+#        codeloc = getdebugidx(debuginfo, pc)
+#        pc::Int = codeloc[1]
+#        debuginfo = debuginfo.linetable
+#        if debuginfo === nothing || pc <= 0
+#            return pc
+#        end
+#    end
+#    return -1
+#end
+## alternative definition of debuginfo_firstline which gets the line for the first existing pc, rather that the first line
+#debuginfo_firstline(debuginfo::Union{Core.DebugInfo,DebugInfoStream}) = deubginfo_line(debuginfo, 1)
+
+# utility function for converting a debuginfo object a particular pc to list of LineInfoNodes representing the inlining info at that pc for function `def`
+# which is either `nothing` (macro-expand), a module (top-level), a Method (unspecialized code) or a MethodInstance (specialized code)
+function buildLineInfoNode(debuginfo, @nospecialize(def), pc::Int)
+    DI = LineInfoNode[]
+    pc == 0 && return DI
+    function append_scopes!(scopes::Vector{LineInfoNode}, pc::Int, debuginfo, @nospecialize(def))
+        while true
+            debuginfo.def isa Symbol || (def = debuginfo.def)
+            codeloc = getdebugidx(debuginfo, pc)
+            line::Int = codeloc[1]
+            line < 0 && return # broken or disabled debug info?
+            if debuginfo.linetable === nothing || line == 0
+                push!(scopes, LineInfoNode(Main, def, debuginfo_file1(debuginfo), Int32(line), Int32(0))) # only populate method/file/line fields
+            else
+                append_scopes!(scopes, line, debuginfo.linetable::Core.DebugInfo, def)
+            end
+            def = :var"macro expansion"
+            inl_to::Int = codeloc[2]
+            inl_to == 0 && break
+            debuginfo = debuginfo.edges[inl_to]
+            pc::Int = codeloc[3]
+            pc == 0 && break # TODO: use toplevel line?
+        end
+    end
+    append_scopes!(DI, pc, debuginfo, def)
+    return DI
+end
+
+# A default line_info_preprinter for printing accurate line number information
+function DILineInfoPrinter(debuginfo, def, showtypes::Bool=false)
     context = LineInfoNode[]
     context_depth = Ref(0)
     indent(s::String) = s^(max(context_depth[], 1) - 1)
-    function emit_lineinfo_update(io::IO, linestart::String, lineidx::Int32)
+    function emit_lineinfo_update(io::IO, linestart::String, pc::Int)
         # internal configuration options:
         linecolor = :yellow
         collapse = showtypes ? false : true
         indent_all = true
-        # convert lineidx to a vector
-        if lineidx == typemin(Int32)
+        # convert pc to a vector
+        if pc == 0
             # sentinel value: reset internal (and external) state
             pops = indent("└")
             if !isempty(pops)
@@ -368,13 +425,10 @@ function DILineInfoPrinter(linetable::Vector, showtypes::Bool=false)
             end
             empty!(context)
             context_depth[] = 0
-        elseif lineidx > 0 # just skip over lines with no debug info at all
-            DI = LineInfoNode[]
-            while lineidx != 0
-                entry = linetable[lineidx]::LineInfoNode
-                push!(DI, entry)
-                lineidx = entry.inlined_at
-            end
+            return ""
+        end
+        DI = reverse!(buildLineInfoNode(debuginfo, def, pc))
+        if !isempty(DI)
             # FOR DEBUGGING, or if you just like very excessive output:
             # this prints out the context in full for every statement
             #empty!(context)
@@ -504,6 +558,7 @@ function DILineInfoPrinter(linetable::Vector, showtypes::Bool=false)
             #end
         end
         indent_all || return ""
+        context_depth[] <= 1 && return ""
         return sprint(io -> printstyled(io, indent("│"), color=linecolor), context=io)
     end
     return emit_lineinfo_update
@@ -799,18 +854,8 @@ end
 
 _strip_color(s::String) = replace(s, r"\e\[\d+m"a => "")
 
-function statementidx_lineinfo_printer(f, code::IRCode)
-    printer = f(code.linetable)
-    function (io::IO, indent::String, idx::Int)
-        printer(io, indent, idx > 0 ? code.stmts[idx][:line] : typemin(Int32))
-    end
-end
-function statementidx_lineinfo_printer(f, code::CodeInfo)
-    printer = f(code.linetable)
-    function (io::IO, indent::String, idx::Int)
-        printer(io, indent, idx > 0 ? code.codelocs[idx] : typemin(Int32))
-    end
-end
+statementidx_lineinfo_printer(f, code::IRCode) = f(code.debuginfo, :var"unknown scope")
+statementidx_lineinfo_printer(f, code::CodeInfo) = f(code.debuginfo, :var"unknown scope")
 statementidx_lineinfo_printer(code) = statementidx_lineinfo_printer(DILineInfoPrinter, code)
 
 function stmts_used(io::IO, code::IRCode, warn_unset_entry=true)

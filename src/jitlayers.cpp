@@ -588,6 +588,9 @@ void jl_generate_fptr_for_unspecialized_impl(jl_code_instance_t *unspec)
         if (src) {
             assert(jl_is_code_info(src));
             ++UnspecFPtrCount;
+            jl_debuginfo_t *debuginfo = src->debuginfo;
+            jl_atomic_store_release(&unspec->debuginfo, debuginfo); // n.b. this assumes the field was previously NULL, which is not entirely true
+            jl_gc_wb(unspec, debuginfo);
             _jl_compile_codeinst(unspec, src, unspec->min_world, *jl_ExecutionEngine->getContext(), 0);
         }
         jl_callptr_t null = nullptr;
@@ -639,15 +642,21 @@ jl_value_t *jl_dump_method_asm_impl(jl_method_instance_t *mi, size_t world,
                 if (jl_is_method(def)) {
                     if (!src) {
                         // TODO: jl_code_for_staged can throw
-                        src = def->generator ? jl_code_for_staged(mi, world) : (jl_code_info_t*)def->source;
+                        if (def->generator) {
+                            src = jl_code_for_staged(mi, world);
+                        }
+                        else {
+                            src = (jl_code_info_t*)def->source;
+                            if (src && (jl_value_t*)src != jl_nothing)
+                                src = jl_uncompress_ir(mi->def.method, NULL, (jl_value_t*)src);
+                        }
                     }
-                    if (src && (jl_value_t*)src != jl_nothing)
-                        src = jl_uncompress_ir(mi->def.method, codeinst, (jl_value_t*)src);
                 }
                 fptr = (uintptr_t)jl_atomic_load_acquire(&codeinst->invoke);
                 specfptr = (uintptr_t)jl_atomic_load_relaxed(&codeinst->specptr.fptr);
                 if (src && jl_is_code_info(src)) {
                     if (fptr == (uintptr_t)jl_fptr_const_return_addr && specfptr == 0) {
+                        codeinst = jl_get_codeinst_for_src(mi, src);
                         fptr = (uintptr_t)_jl_compile_codeinst(codeinst, src, world, *jl_ExecutionEngine->getContext(), 0);
                         (void)fptr; // silence unused variable warning
                         specfptr = (uintptr_t)jl_atomic_load_relaxed(&codeinst->specptr.fptr);

@@ -64,7 +64,7 @@
 #   }
 #end
 
-# struct GenericMemoryRef{kind::Symbol, T, AS::AddrSpace}
+#struct GenericMemoryRef{kind::Symbol, T, AS::AddrSpace}
 #    mem::Memory{kind, T, AS}
 #    data::Ptr{Cvoid} # make this GenericPtr{addrspace, Cvoid}
 #end
@@ -131,6 +131,13 @@
 #    file::Symbol
 #    line::Int32
 #    inlined_at::Int32
+#end
+
+#struct DebugInfo
+#    def::Any # (Union{Symbol, Method, MethodInstance})
+#    linetable::Any # (Union{Nothing,DebugInfo})
+#    edges::SimpleVector # Vector{DebugInfo}
+#    codelocs::String # compressed Vector{UInt8}
 #end
 
 #struct GotoNode
@@ -295,6 +302,9 @@ TypeVar(@nospecialize(n)) = _typevar(n::Symbol, Union{}, Any)
 TypeVar(@nospecialize(n), @nospecialize(ub)) = _typevar(n::Symbol, Union{}, ub)
 TypeVar(@nospecialize(n), @nospecialize(lb), @nospecialize(ub)) = _typevar(n::Symbol, lb, ub)
 UnionAll(@nospecialize(v), @nospecialize(t)) = ccall(:jl_type_unionall, Any, (Any, Any), v::TypeVar, t)
+
+const Memory{T} = GenericMemory{:not_atomic, T, CPU}
+const MemoryRef{T} = GenericMemoryRef{:not_atomic, T, CPU}
 
 # simple convert for use by constructors of types in Core
 # note that there is no actual conversion defined here,
@@ -467,6 +477,10 @@ eval(Core, quote
     end
     LineInfoNode(mod::Module, @nospecialize(method), file::Symbol, line::Int32, inlined_at::Int32) =
         $(Expr(:new, :LineInfoNode, :mod, :method, :file, :line, :inlined_at))
+    DebugInfo(def::Union{Method,MethodInstance,Symbol}, linetable::Union{Nothing,DebugInfo}, edges::SimpleVector, codelocs::String) =
+        $(Expr(:new, :DebugInfo, :def, :linetable, :edges, :codelocs))
+    DebugInfo(def::Union{Method,MethodInstance,Symbol}) =
+        $(Expr(:new, :DebugInfo, :def, nothing, Core.svec(), ""))
     SlotNumber(n::Int) = $(Expr(:new, :SlotNumber, :n))
     PhiNode(edges::Array{Int32, 1}, values::Array{Any, 1}) = $(Expr(:new, :PhiNode, :edges, :values))
     PiNode(@nospecialize(val), @nospecialize(typ)) = $(Expr(:new, :PiNode, :val, :typ))
@@ -485,12 +499,11 @@ function CodeInstance(
     mi::MethodInstance, @nospecialize(rettype), @nospecialize(exctype), @nospecialize(inferred_const),
     @nospecialize(inferred), const_flags::Int32, min_world::UInt, max_world::UInt,
     ipo_effects::UInt32, effects::UInt32, @nospecialize(analysis_results),
-    relocatability::UInt8)
+    relocatability::UInt8, edges::DebugInfo)
     return ccall(:jl_new_codeinst, Ref{CodeInstance},
-        (Any, Any, Any, Any, Any, Int32, UInt, UInt, UInt32, UInt32, Any, UInt8),
+        (Any, Any, Any, Any, Any, Int32, UInt, UInt, UInt32, UInt32, Any, UInt8, Any),
         mi, rettype, exctype, inferred_const, inferred, const_flags, min_world, max_world,
-        ipo_effects, effects, analysis_results,
-        relocatability)
+        ipo_effects, effects, analysis_results, relocatability, edges)
 end
 GlobalRef(m::Module, s::Symbol) = ccall(:jl_module_globalref, Ref{GlobalRef}, (Any, Any), m, s)
 Module(name::Symbol=:anonymous, std_imports::Bool=true, default_names::Bool=true) = ccall(:jl_f_new_module, Ref{Module}, (Any, Bool, Bool), name, std_imports, default_names)
@@ -517,8 +530,6 @@ const undef = UndefInitializer()
 (self::Type{GenericMemory{kind,T,addrspace}})() where {T,kind,addrspace} = self(undef, 0)
 # copy constructors
 
-const Memory{T} = GenericMemory{:not_atomic, T, CPU}
-const MemoryRef{T} = GenericMemoryRef{:not_atomic, T, CPU}
 GenericMemoryRef(mem::GenericMemory) = memoryref(mem)
 GenericMemoryRef(ref::GenericMemoryRef, i::Integer) = memoryref(ref, Int(i), @_boundscheck)
 GenericMemoryRef(mem::GenericMemory, i::Integer) = memoryref(memoryref(mem), Int(i), @_boundscheck)
@@ -626,12 +637,12 @@ module IR
 
 export CodeInfo, MethodInstance, CodeInstance, GotoNode, GotoIfNot, ReturnNode,
     NewvarNode, SSAValue, SlotNumber, Argument,
-    PiNode, PhiNode, PhiCNode, UpsilonNode, LineInfoNode,
+    PiNode, PhiNode, PhiCNode, UpsilonNode, LineInfoNode, DebugInfo,
     Const, PartialStruct, InterConditional, EnterNode
 
 using Core: CodeInfo, MethodInstance, CodeInstance, GotoNode, GotoIfNot, ReturnNode,
     NewvarNode, SSAValue, SlotNumber, Argument,
-    PiNode, PhiNode, PhiCNode, UpsilonNode, LineInfoNode,
+    PiNode, PhiNode, PhiCNode, UpsilonNode, LineInfoNode, DebugInfo,
     Const, PartialStruct, InterConditional, EnterNode
 
 end # module IR

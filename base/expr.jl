@@ -81,8 +81,7 @@ function copy(c::CodeInfo)
     if cnew.slottypes !== nothing
         cnew.slottypes = copy(cnew.slottypes)
     end
-    cnew.codelocs  = copy(cnew.codelocs)
-    cnew.linetable = copy(cnew.linetable::Union{Vector{Any},Vector{Core.LineInfoNode}})
+    cnew.debuginfo = c.debuginfo
     cnew.ssaflags  = copy(cnew.ssaflags)
     cnew.edges     = cnew.edges === nothing ? nothing : copy(cnew.edges::Vector)
     ssavaluetypes  = cnew.ssavaluetypes
@@ -1014,8 +1013,7 @@ function remove_linenums!(ex::Expr)
     return ex
 end
 function remove_linenums!(src::CodeInfo)
-    src.codelocs .= 0
-    length(src.linetable) > 1 && resize!(src.linetable, 1)
+    src.debuginfo = Core.DebugInfo(src.debuginfo.def) # TODO: filter, but keep, edges
     return src
 end
 
