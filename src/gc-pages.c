@@ -1,6 +1,6 @@
 // This file is a part of Julia. License is MIT: https://julialang.org/license
 
-#include "gc.h"
+#include "gc-stock.h"
 #ifndef _OS_WINDOWS_
 #  include <sys/resource.h>
 #endif
@@ -8,6 +8,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#ifndef THIRD_PARTY_GC // third party GC backend must provide its own allocator
 
 // Try to allocate memory in chunks to permit faster allocation
 // and improve memory locality of the pools
@@ -193,6 +195,8 @@ void jl_gc_free_page(jl_gc_pagemeta_t *pg) JL_NOTSAFEPOINT
     msan_unpoison(p, decommit_size);
     jl_atomic_fetch_add_relaxed(&gc_heap_stats.bytes_resident, -decommit_size);
 }
+
+#endif // THIRD_PARTY_GC
 
 #ifdef __cplusplus
 }

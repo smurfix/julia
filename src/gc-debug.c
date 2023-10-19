@@ -1,6 +1,6 @@
 // This file is a part of Julia. License is MIT: https://julialang.org/license
 
-#include "gc.h"
+#include "gc-stock.h"
 #include "julia.h"
 #include <inttypes.h>
 #include <stddef.h>
@@ -16,6 +16,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#ifndef THIRD_PARTY_GC // third party GC backend must provide its own debugging infrastructure
 
 // Useful function in debugger to find page metadata
 jl_gc_pagemeta_t *jl_gc_page_metadata(void *data)
@@ -1233,6 +1235,8 @@ void _report_gc_finished(uint64_t pause, uint64_t freed, int full, int recollect
     );
     // Should fragmentation use bytes_resident instead of heap_size?
 }
+
+#endif // THIRD_PARTY_GC
 
 #ifdef __cplusplus
 }

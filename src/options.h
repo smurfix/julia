@@ -83,6 +83,11 @@
 // GC_SMALL_PAGE allocates objects in 4k pages
 // #define GC_SMALL_PAGE
 
+// third party GC configuration options
+
+// THIRD_PARTY_GC must be enable to support an alternative GC backend
+// #define THIRD_PARTY_GC
+
 
 // method dispatch profiling --------------------------------------------------
 

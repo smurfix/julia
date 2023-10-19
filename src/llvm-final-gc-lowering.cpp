@@ -163,23 +163,6 @@ void FinalLowerGC::lowerGetGCFrameSlot(CallInst *target, Function &F)
     target->eraseFromParent();
 }
 
-void FinalLowerGC::lowerQueueGCRoot(CallInst *target, Function &F)
-{
-    ++QueueGCRootCount;
-    assert(target->arg_size() == 1);
-    target->setCalledFunction(queueRootFunc);
-}
-
-void FinalLowerGC::lowerSafepoint(CallInst *target, Function &F)
-{
-    ++SafepointCount;
-    assert(target->arg_size() == 1);
-    IRBuilder<> builder(target);
-    Value* signal_page = target->getOperand(0);
-    builder.CreateLoad(T_size, signal_page, true);
-    target->eraseFromParent();
-}
-
 void FinalLowerGC::lowerGCAllocBytes(CallInst *target, Function &F)
 {
     ++GCAllocBytesCount;
@@ -201,8 +184,7 @@ void FinalLowerGC::lowerGCAllocBytes(CallInst *target, Function &F)
                 { ptls, ConstantInt::get(T_size, sz + sizeof(void*)), type });
             if (sz > 0)
                 derefBytes = sz;
-        }
-        else {
+        } else {
             auto pool_offs = ConstantInt::get(Type::getInt32Ty(F.getContext()), offset);
             auto pool_osize = ConstantInt::get(Type::getInt32Ty(F.getContext()), osize);
             newI = builder.CreateCall(poolAllocFunc, { ptls, pool_offs, pool_osize, type });
@@ -222,6 +204,23 @@ void FinalLowerGC::lowerGCAllocBytes(CallInst *target, Function &F)
         newI->addDereferenceableRetAttr(derefBytes);
     newI->takeName(target);
     target->replaceAllUsesWith(newI);
+    target->eraseFromParent();
+}
+
+void FinalLowerGC::lowerQueueGCRoot(CallInst *target, Function &F)
+{
+    ++QueueGCRootCount;
+    assert(target->arg_size() == 1);
+    target->setCalledFunction(queueRootFunc);
+}
+
+void FinalLowerGC::lowerSafepoint(CallInst *target, Function &F)
+{
+    ++SafepointCount;
+    assert(target->arg_size() == 1);
+    IRBuilder<> builder(target);
+    Value* signal_page = target->getOperand(0);
+    builder.CreateLoad(T_size, signal_page, true);
     target->eraseFromParent();
 }
 

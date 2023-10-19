@@ -3,7 +3,7 @@
 #include "gc-alloc-profiler.h"
 
 #include "julia_internal.h"
-#include "gc.h"
+#include "gc-stock.h"
 
 #include "llvm/ADT/SmallVector.h"
 

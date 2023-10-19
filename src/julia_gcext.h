@@ -25,6 +25,9 @@ typedef void (*jl_gc_cb_post_gc_t)(int full) JL_NOTSAFEPOINT;
 typedef void (*jl_gc_cb_notify_external_alloc_t)(void *addr, size_t size) JL_NOTSAFEPOINT;
 typedef void (*jl_gc_cb_notify_external_free_t)(void *addr) JL_NOTSAFEPOINT;
 
+// Notify if system is under pressure
+typedef void (*jl_gc_cb_notify_gc_pressure_t)(void) JL_NOTSAFEPOINT;
+
 JL_DLLEXPORT void jl_gc_set_cb_root_scanner(jl_gc_cb_root_scanner_t cb, int enable);
 JL_DLLEXPORT void jl_gc_set_cb_task_scanner(jl_gc_cb_task_scanner_t cb, int enable);
 JL_DLLEXPORT void jl_gc_set_cb_pre_gc(jl_gc_cb_pre_gc_t cb, int enable);

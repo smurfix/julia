@@ -511,6 +511,7 @@
     XX(jl_wakeup_thread) \
     XX(jl_write_compiler_output) \
     XX(jl_yield) \
+    // Third party GC write barrier functions \
 
 #define JL_RUNTIME_EXPORTED_FUNCS_WIN(XX) \
     XX(jl_setjmp) \

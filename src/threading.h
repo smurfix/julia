@@ -8,6 +8,7 @@
 extern "C" {
 #endif
 
+#include "gc-interface-threads.h"
 #include "julia.h"
 
 #define PROFILE_JL_THREADING            0
@@ -25,8 +26,6 @@ jl_ptls_t jl_init_threadtls(int16_t tid) JL_NOTSAFEPOINT;
 
 // provided by a threading infrastructure
 void jl_init_threadinginfra(void);
-void jl_parallel_gc_threadfun(void *arg);
-void jl_concurrent_gc_threadfun(void *arg);
 void jl_threadfun(void *arg);
 
 #ifdef __cplusplus
