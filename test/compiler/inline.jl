@@ -942,7 +942,7 @@ let # aggressive inlining of single, abstract method match (with constant-prop'e
     # both callsite should be inlined with constant-prop'ed result
     @test count(isinvoke(:isType), src.code) == 2
     @test count(isinvoke(:_has_free_typevars), src.code) == 0
-    # `isGoodType(y::Any)` isn't fully convered, thus a runtime type check and fallback dynamic dispatch should be inserted
+    # `isGoodType(y::Any)` isn't fully covered, thus a runtime type check and fallback dynamic dispatch should be inserted
     @test count(iscall((src,isGoodType2)), src.code) == 1
 end
 

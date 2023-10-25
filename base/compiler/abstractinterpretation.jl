@@ -2046,7 +2046,7 @@ function abstract_call_known(interp::AbstractInterpreter, @nospecialize(f),
             tv = t.parameters[1]
             rt = Const(has_free_typevars(tv) ? typeof(tv) : Core.Typeof(tv))
         elseif !hasintersect(t, Type)
-            rt = typeof_tfunc(t)
+            rt = typeof_tfunc(𝕃ᵢ, t)
         else
             rt = DataType
         end
