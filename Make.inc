@@ -785,7 +785,7 @@ JCXXFLAGS += -DUSE_TIMING_COUNTS
 JCFLAGS += -DUSE_TIMING_COUNTS
 endif
 
-LLVMDIALECTS:=-lllvm-dialects
+LLVMDIALECTS:=-lllvm_dialects
 
 # ===========================================================================
 
