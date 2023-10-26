@@ -785,6 +785,8 @@ JCXXFLAGS += -DUSE_TIMING_COUNTS
 JCFLAGS += -DUSE_TIMING_COUNTS
 endif
 
+LLVMDIALECTS:=-lllvm-dialects
+
 # ===========================================================================
 
 # Select the cpu architecture to target, or automatically detects the user's compiler
