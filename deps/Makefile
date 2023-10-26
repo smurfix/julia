@@ -36,7 +36,7 @@ BUILDDIR := $(BUILDDIR)$(MAYBE_HOST)
 # prevent installing libs into usr/lib64 on opensuse
 unexport CONFIG_SITE
 
-DEP_LIBS := JuliaSyntax llvm-dialects
+DEP_LIBS := JuliaSyntax llvmdialects
 
 ifeq ($(USE_SYSTEM_LIBBLASTRAMPOLINE), 0)
 DEP_LIBS += blastrampoline
