@@ -98,6 +98,8 @@ Standard library changes
 
 #### Test
 
+* `@test_throws Nothing expr` can now be used to test that `expr` does not throw an exception.
+
 #### Dates
 
 #### Statistics

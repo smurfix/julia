@@ -547,7 +547,7 @@ function f17572(::Type{Val{A}}) where A
     return Tuple{Int}(Tuple{A}((1,)))
 end
 # test that inference doesn't error
-@test isa(code_typed(f17572, (Type{Val{0}},)), Array)
+@test_throws Nothing code_typed(f17572, (Type{Val{0}},))
 
 # === with singleton constants
 let f(x) = (x===nothing) ? 1 : 1.0
@@ -4497,7 +4497,7 @@ end
 end
 
 # issue #42646
-@test only(Base.return_types(getindex, (Array{undef}, Int))) >: Union{} # check that it does not throw
+@test_throws Nothing Base.return_types(getindex, (Array{undef}, Int))
 
 # form PartialStruct for extra type information propagation
 struct FieldTypeRefinement{S,T}

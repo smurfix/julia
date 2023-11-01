@@ -1403,7 +1403,7 @@ test_repr("(:).a")
 end
 
 # Test that REPL/mime display of invalid UTF-8 data doesn't throw an exception:
-@test isa(repr("text/plain", String(UInt8[0x00:0xff;])), String)
+@test_throws Nothing repr("text/plain", String(UInt8[0x00:0xff;]))
 
 # don't use julia-specific `f` in Float32 printing (PR #18053)
 @test sprint(print, 1f-7) == "1.0e-7"
@@ -1431,7 +1431,7 @@ end
 let m = which(T20332{Int}(), (Int,)),
     mi = Core.Compiler.specialize_method(m, Tuple{T20332{T}, Int} where T, Core.svec())
     # test that this doesn't throw an error
-    @test occursin("MethodInstance for", repr(mi))
+    @test_throws Nothing repr(mi)
     # issue #41928
     str = sprint(mi; context=:color=>true) do io, mi
         printstyled(io, mi; color=:light_cyan)
