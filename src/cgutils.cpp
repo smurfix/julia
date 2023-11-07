@@ -2400,6 +2400,34 @@ static jl_cgval_t emit_getfield_knownidx(jl_codectx_t &ctx, const jl_cgval_t &st
                                          unsigned idx, jl_datatype_t *jt,
                                          enum jl_memory_order order, Value **nullcheck=nullptr);
 
+static bool field_may_be_null(const jl_cgval_t &strct, jl_datatype_t *stt, size_t idx)
+{
+    ssize_t nfields = jl_datatype_nfields(stt);
+    if (idx < nfields - (unsigned)stt->name->n_uninitialized)
+        return false;
+    if (!jl_field_isptr(stt, idx) && !jl_type_hasptr(jl_field_type(stt, idx)))
+        return false;
+    if (strct.constant) {
+        if (jl_field_isdefined(strct.constant, idx)) // technically a data race?
+            return false;
+    }
+    return true;
+}
+
+static bool field_may_be_null(const jl_cgval_t &strct, jl_datatype_t *stt)
+{
+    ssize_t nfields = jl_datatype_nfields(stt);
+    if ((unsigned)stt->name->n_uninitialized == 0)
+        return false;
+    for (size_t i = 0; i < stt->name->n_uninitialized; i++) {
+        size_t idx = nfields - i - 1;
+        if (field_may_be_null(strct, stt, idx))
+            return true;
+    }
+    return false;
+}
+
+
 static bool emit_getfield_unknownidx(jl_codectx_t &ctx,
         jl_cgval_t *ret, jl_cgval_t strct,
         Value *idx, jl_datatype_t *stt, jl_value_t *inbounds,
@@ -2407,7 +2435,7 @@ static bool emit_getfield_unknownidx(jl_codectx_t &ctx,
 {
     ++EmittedGetfieldUnknowns;
     size_t nfields = jl_datatype_nfields(stt);
-    bool maybe_null = (unsigned)stt->name->n_uninitialized != 0;
+    bool maybe_null = field_may_be_null(strct, stt);
     auto idx0 = [&]() {
         return emit_bounds_check(ctx, strct, (jl_value_t*)stt, idx, ConstantInt::get(ctx.types().T_size, nfields), inbounds);
     };
@@ -2622,8 +2650,7 @@ static jl_cgval_t emit_getfield_knownidx(jl_codectx_t &ctx, const jl_cgval_t &st
     }
     if (type_is_ghost(julia_type_to_llvm(ctx, jfty)))
         return ghostValue(ctx, jfty);
-    size_t nfields = jl_datatype_nfields(jt);
-    bool maybe_null = idx >= nfields - (unsigned)jt->name->n_uninitialized;
+    bool maybe_null = field_may_be_null(strct, jt, idx);
     size_t byte_offset = jl_field_offset(jt, idx);
     if (strct.ispointer()) {
         auto tbaa = best_field_tbaa(ctx, strct, jt, idx, byte_offset);
@@ -3677,8 +3704,7 @@ static jl_cgval_t emit_setfield(jl_codectx_t &ctx,
     else {
         unsigned align = jl_field_align(sty, idx0);
         bool isboxed = jl_field_isptr(sty, idx0);
-        size_t nfields = jl_datatype_nfields(sty);
-        bool maybe_null = idx0 >= nfields - (unsigned)sty->name->n_uninitialized;
+        bool maybe_null = field_may_be_null(strct, sty, idx0);
         return typed_store(ctx, addr, NULL, rhs, cmp, jfty, tbaa, nullptr,
             wb ? boxed(ctx, strct) : nullptr,
             isboxed, Order, FailOrder, align,
