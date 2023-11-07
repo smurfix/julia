@@ -2417,8 +2417,6 @@ static bool field_may_be_null(const jl_cgval_t &strct, jl_datatype_t *stt, size_
 static bool field_may_be_null(const jl_cgval_t &strct, jl_datatype_t *stt)
 {
     ssize_t nfields = jl_datatype_nfields(stt);
-    if ((unsigned)stt->name->n_uninitialized == 0)
-        return false;
     for (size_t i = 0; i < stt->name->n_uninitialized; i++) {
         size_t idx = nfields - i - 1;
         if (field_may_be_null(strct, stt, idx))
