@@ -2402,7 +2402,7 @@ static jl_cgval_t emit_getfield_knownidx(jl_codectx_t &ctx, const jl_cgval_t &st
 
 static bool field_may_be_null(const jl_cgval_t &strct, jl_datatype_t *stt, size_t idx)
 {
-    ssize_t nfields = jl_datatype_nfields(stt);
+    size_t nfields = jl_datatype_nfields(stt);
     if (idx < nfields - (unsigned)stt->name->n_uninitialized)
         return false;
     if (!jl_field_isptr(stt, idx) && !jl_type_hasptr(jl_field_type(stt, idx)))
@@ -2416,8 +2416,8 @@ static bool field_may_be_null(const jl_cgval_t &strct, jl_datatype_t *stt, size_
 
 static bool field_may_be_null(const jl_cgval_t &strct, jl_datatype_t *stt)
 {
-    ssize_t nfields = jl_datatype_nfields(stt);
-    for (size_t i = 0; i < stt->name->n_uninitialized; i++) {
+    size_t nfields = jl_datatype_nfields(stt);
+    for (size_t i = 0; i < (unsigned)stt->name->n_uninitialized; i++) {
         size_t idx = nfields - i - 1;
         if (field_may_be_null(strct, stt, idx))
             return true;
