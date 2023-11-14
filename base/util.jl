@@ -205,6 +205,7 @@ function julia_cmd(julia=joinpath(Sys.BINDIR, julia_exename()); cpu_target::Unio
     opts.can_inline == 0 && push!(addflags, "--inline=no")
     opts.use_compiled_modules == 0 && push!(addflags, "--compiled-modules=no")
     opts.use_compiled_modules == 2 && push!(addflags, "--compiled-modules=existing")
+    opts.use_compiled_modules == 3 && push!(addflags, "--compiled-modules=strict")
     opts.opt_level == 2 || push!(addflags, "-O$(opts.opt_level)")
     opts.opt_level_min == 0 || push!(addflags, "--min-optlevel=$(opts.opt_level_min)")
     push!(addflags, "-g$(opts.debug_level)")
