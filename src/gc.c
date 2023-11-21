@@ -1658,6 +1658,18 @@ void gc_free_pages(void)
     }
 }
 
+void gc_move_to_global_page_pool(jl_gc_page_stack_t *pgstack)
+{
+    while (1) {
+        jl_gc_pagemeta_t *pg = pop_lf_back(pgstack);
+        if (pg == NULL) {
+            break;
+        }
+        jl_gc_free_page(pg);
+        push_lf_back(&global_page_pool_freed, pg);
+    }
+}
+
 // setup the data-structures for a sweep over all memory pools
 static void gc_sweep_pool(void)
 {
@@ -1670,7 +1682,7 @@ static void gc_sweep_pool(void)
 
     // allocate enough space to hold the end of the free list chain
     // for every thread and pool size
-    jl_taggedvalue_t ***pfl = (jl_taggedvalue_t ***) alloca(n_threads * JL_GC_N_POOLS * sizeof(jl_taggedvalue_t**));
+    jl_taggedvalue_t ***pfl = (jl_taggedvalue_t ***) malloc_s(n_threads * JL_GC_N_POOLS * sizeof(jl_taggedvalue_t**));
 
     // update metadata of pages that were pointed to by freelist or newpages from a pool
     // i.e. pages being the current allocation target
@@ -1712,7 +1724,7 @@ static void gc_sweep_pool(void)
     }
 
     // the actual sweeping
-    jl_gc_page_stack_t *tmp = (jl_gc_page_stack_t *)alloca(n_threads * sizeof(jl_gc_page_stack_t));
+    jl_gc_page_stack_t *tmp = (jl_gc_page_stack_t *)malloc_s(n_threads * sizeof(jl_gc_page_stack_t));
     memset(tmp, 0, n_threads * sizeof(jl_gc_page_stack_t));
     jl_atomic_store(&gc_allocd_scratch, tmp);
     gc_sweep_wake_all();
@@ -1729,6 +1741,7 @@ static void gc_sweep_pool(void)
             }
         }
     }
+    free(tmp);
 
     // merge free lists
     for (int t_i = 0; t_i < n_threads; t_i++) {
@@ -1759,6 +1772,7 @@ static void gc_sweep_pool(void)
             }
         }
     }
+    free(pfl);
 
 #ifdef _P64 // only enable concurrent sweeping on 64bit
     // wake thread up to sweep concurrently
@@ -3065,11 +3079,13 @@ void gc_mark_clean_reclaim_sets(void)
     // Clean up `reclaim-sets`
     for (int i = 0; i < gc_n_threads; i++) {
         jl_ptls_t ptls2 = gc_all_tls_states[i];
-        arraylist_t *reclaim_set2 = &ptls2->mark_queue.reclaim_set;
-        ws_array_t *a = NULL;
-        while ((a = (ws_array_t *)arraylist_pop(reclaim_set2)) != NULL) {
-            free(a->buffer);
-            free(a);
+        if (ptls2 != NULL) {
+            arraylist_t *reclaim_set2 = &ptls2->mark_queue.reclaim_set;
+            ws_array_t *a = NULL;
+            while ((a = (ws_array_t *)arraylist_pop(reclaim_set2)) != NULL) {
+                free(a->buffer);
+                free(a);
+            }
         }
     }
 }
@@ -3588,7 +3604,8 @@ static int _jl_gc_collect(jl_ptls_t ptls, jl_gc_collection_t collection)
             ptls2->heap.remset->len = 0;
         }
         // free empty GC state for threads that have exited
-        if (ptls2->current_task == NULL) {
+        if (jl_atomic_load_relaxed(&ptls2->current_task) == NULL &&
+            (ptls->tid < gc_first_tid || ptls2->tid >= gc_first_tid + jl_n_gcthreads)) {
             jl_thread_heap_t *heap = &ptls2->heap;
             if (heap->weak_refs.len == 0)
                 small_arraylist_free(&heap->weak_refs);
@@ -3599,9 +3616,10 @@ static int _jl_gc_collect(jl_ptls_t ptls, jl_gc_collection_t collection)
             if (heap->last_remset->len == 0)
                 arraylist_free(heap->last_remset);
             if (ptls2->finalizers.len == 0)
-                arraylist_free(&ptls->finalizers);
+                arraylist_free(&ptls2->finalizers);
             if (ptls2->sweep_objs.len == 0)
-                arraylist_free(&ptls->sweep_objs);
+                arraylist_free(&ptls2->sweep_objs);
+            gc_move_to_global_page_pool(&ptls2->page_metadata_buffered);
         }
     }
 
