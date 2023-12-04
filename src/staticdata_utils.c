@@ -121,7 +121,7 @@ JL_DLLEXPORT void jl_push_newly_deleted(jl_value_t* m)
     JL_LOCK(&newly_deleted_mutex);
     size_t end = jl_array_len(newly_deleted);
     jl_array_grow_end(newly_deleted, 1);
-    jl_arrayset(newly_deleted, m, end);
+    jl_array_ptr_set(newly_deleted, end, m);
     JL_UNLOCK(&newly_deleted_mutex);
 }
 
