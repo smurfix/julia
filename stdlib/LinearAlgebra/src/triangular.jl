@@ -472,9 +472,9 @@ end
 # Define `mul!` for (Unit){Upper,Lower}Triangular matrices times a number.
 # be permissive here and require compatibility later in _triscale!
 @inline mul!(A::AbstractTriangular, B::AbstractTriangular, C::Number, alpha::Number, beta::Number) =
-    _triscale!(A, B, C, MulAddMul(alpha, beta))
+    @stable_muladdmul _triscale!(A, B, C, MulAddMul(alpha, beta))
 @inline mul!(A::AbstractTriangular, B::Number, C::AbstractTriangular, alpha::Number, beta::Number) =
-    _triscale!(A, B, C, MulAddMul(alpha, beta))
+    @stable_muladdmul _triscale!(A, B, C, MulAddMul(alpha, beta))
 
 function _triscale!(A::UpperTriangular, B::UpperTriangular, c::Number, _add)
     n = checksquare(B)
@@ -732,7 +732,7 @@ for TC in (:AbstractVector, :AbstractMatrix)
         if isone(alpha) && iszero(beta)
             return mul!(C, A, B)
         else
-            return generic_matvecmul!(C, 'N', A, B, MulAddMul(alpha, beta))
+            return @stable_muladdmul generic_matvecmul!(C, 'N', A, B, MulAddMul(alpha, beta))
         end
     end
 end
@@ -744,7 +744,7 @@ for (TA, TB) in ((:AbstractTriangular, :AbstractMatrix),
         if isone(alpha) && iszero(beta)
             return mul!(C, A, B)
         else
-            return generic_matmatmul!(C, 'N', 'N', A, B, MulAddMul(alpha, beta))
+            return @stable_muladdmul generic_matmatmul!(C, 'N', 'N', A, B, MulAddMul(alpha, beta))
         end
     end
 end
