@@ -262,7 +262,7 @@ julia> C
 ```
 """
 @inline mul!(C::AbstractMatrix, A::AbstractVecOrMat, B::AbstractVecOrMat, α::Number, β::Number) =
-    generic_matmatmul!(
+    @stable_muladdmul generic_matmatmul!(
         C,
         wrapper_char(A),
         wrapper_char(B),
@@ -425,9 +425,9 @@ Base.@constprop :aggressive function gemv!(y::StridedVector{T}, tA::AbstractChar
     if tA in ('S', 's', 'H', 'h')
         # re-wrap again and use plain ('N') matvec mul algorithm,
         # because _generic_matvecmul! can't handle the HermOrSym cases specifically
-        return _generic_matvecmul!(y, 'N', wrap(A, tA), x, MulAddMul(α, β))
+        return @stable_muladdmul _generic_matvecmul!(y, 'N', wrap(A, tA), x, MulAddMul(α, β))
     else
-        return _generic_matvecmul!(y, tA, A, x, MulAddMul(α, β))
+        return @stable_muladdmul _generic_matvecmul!(y, tA, A, x, MulAddMul(α, β))
     end
 end
 
@@ -449,7 +449,7 @@ Base.@constprop :aggressive function gemv!(y::StridedVector{Complex{T}}, tA::Abs
         return y
     else
         Anew, ta = tA in ('S', 's', 'H', 'h') ? (wrap(A, tA), 'N') : (A, tA)
-        return _generic_matvecmul!(y, ta, Anew, x, MulAddMul(α, β))
+        return @stable_muladdmul _generic_matvecmul!(y, ta, Anew, x, MulAddMul(α, β))
     end
 end
 
@@ -475,9 +475,9 @@ Base.@constprop :aggressive function gemv!(y::StridedVector{Complex{T}}, tA::Abs
     elseif tA in ('S', 's', 'H', 'h')
         # re-wrap again and use plain ('N') matvec mul algorithm,
         # because _generic_matvecmul! can't handle the HermOrSym cases specifically
-        return _generic_matvecmul!(y, 'N', wrap(A, tA), x, MulAddMul(α, β))
+        return @stable_muladdmul _generic_matvecmul!(y, 'N', wrap(A, tA), x, MulAddMul(α, β))
     else
-        return _generic_matvecmul!(y, tA, A, x, MulAddMul(α, β))
+        return @stable_muladdmul _generic_matvecmul!(y, tA, A, x, MulAddMul(α, β))
     end
 end
 
