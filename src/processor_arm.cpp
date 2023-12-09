@@ -1574,7 +1574,7 @@ static uint32_t sysimg_init_cb(const void *id, jl_value_t **rejection_reason)
         }
     }
     auto match = match_sysimg_targets(sysimg, target, max_vector_size, rejection_reason);
-    if (match.best_idx == -1)
+    if (match.best_idx == (uint32_t)-1)
         return match.best_idx;
     // Now we've decided on which sysimg version to use.
     // Make sure the JIT target is compatible with it and save the JIT target.
@@ -1631,7 +1631,7 @@ static void ensure_jit_target(bool imaging)
         // The most useful one in general...
         t.en.flags |= JL_TARGET_CLONE_LOOP;
 #elif defined(_CPU_ARM_)
-        static constexpr uint32_t clone_math[] = {Feature::vfp3, Feature::vfp4, Feature::neon};
+        static constexpr uint32_t clone_math[] = {Feature::vfp3, Feature::vfp4sp, Feature::vfp4, Feature::neon};
         for (auto fe: clone_math) {
             if (!test_nbit(features0, fe) && test_nbit(t.en.features, fe)) {
                 t.en.flags |= JL_TARGET_CLONE_MATH;
