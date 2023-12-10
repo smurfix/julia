@@ -744,7 +744,7 @@ for (TA, TB) in ((:AbstractTriangular, :AbstractMatrix),
         if isone(alpha) && iszero(beta)
             return mul!(C, A, B)
         else
-            return @stable_muladdmul generic_matmatmul!(C, 'N', 'N', A, B, MulAddMul(alpha, beta))
+            return generic_matmatmul!(C, 'N', 'N', A, B, alpha, beta)
         end
     end
 end
