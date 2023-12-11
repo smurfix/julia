@@ -14,7 +14,6 @@ macro newinterp(InterpName)
     C = Core
     CC = Core.Compiler
     quote
-        $InterpCacheName() = $CC.InternalCodeCache($InterpCacheName)
         struct $InterpName <: $CC.AbstractInterpreter
             meta # additional information
             world::UInt
@@ -27,7 +26,7 @@ macro newinterp(InterpName)
                                  inf_params::$CC.InferenceParams = $CC.InferenceParams(),
                                  opt_params::$CC.OptimizationParams = $CC.OptimizationParams(),
                                  inf_cache::Vector{$CC.InferenceResult} = $CC.InferenceResult[],
-                                 code_cache::$CC.InternalCodeCache = $InterpCacheName())
+                                 code_cache::$CC.InternalCodeCache = $CC.InternalCodeCache($InterpCacheName))
                 return new(meta, world, inf_params, opt_params, inf_cache, code_cache)
             end
         end

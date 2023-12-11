@@ -62,13 +62,14 @@ let mi = only(Base.specializations(only(methods(basic_caller))))
 end
 
 # this redefinition below should invalidate the cache
+const BASIC_CALLER_WORLD = Base.get_world_counter()
 basic_callee(x) = x, x
 @test isempty(Base.specializations(only(methods(basic_callee))))
 let mi = only(Base.specializations(only(methods(basic_caller))))
     ci = mi.cache
     @test !isdefined(ci, :next)
     @test ci.owner === InvalidationTesterToken()
-    @test ci.max_world != typemax(UInt)
+    @test ci.max_world == BASIC_CALLER_WORLD
 end
 
 # re-run inference and check the result is updated (and new cache exists)
