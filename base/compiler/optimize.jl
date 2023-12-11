@@ -81,7 +81,8 @@ is_declared_noinline(@nospecialize src::MaybeCompressed) =
 is_source_inferred(@nospecialize src::MaybeCompressed) =
     ccall(:jl_ir_flag_inferred, Bool, (Any,), src)
 
-function inlining_policy(interp::AbstractInterpreter,
+# return whether this src should be inlined. If so, retrieve_ir_for_inlining must return an IRCode from it
+function src_inlining_policy(interp::AbstractInterpreter,
     @nospecialize(src), @nospecialize(info::CallInfo), stmt_flag::UInt32)
     if isa(src, MaybeCompressed)
         is_source_inferred(src) || return nothing
@@ -94,6 +95,8 @@ function inlining_policy(interp::AbstractInterpreter,
     end
     return false
 end
+
+function inlining_policy end # deprecated legacy name used by Cthulhu
 
 struct InliningState{Interp<:AbstractInterpreter}
     edges::Vector{Any}

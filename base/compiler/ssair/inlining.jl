@@ -868,7 +868,7 @@ function resolve_todo(mi::MethodInstance, result::Union{Nothing,InferenceResult,
             compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
     end
 
-    inlining_policy(state.interp, src, info, flag) ||
+    src_inlining_policy(state.interp, src, info, flag) ||
         return compileable_specialization(mi, effects, et, info;
             compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
 
@@ -902,7 +902,8 @@ function resolve_todo(mi::MethodInstance, @nospecialize(info::CallInfo), flag::U
         effects = Effects()
     end
 
-    inlining_policy(state.interp, src, info, flag) || return nothing
+    preserve_local_sources = true
+    src_inlining_policy(state.interp, src, info, flag) || return nothing
     ir = cached_result isa CodeInstance  ? retrieve_ir_for_inlining(cached_result, src) :
                                            retrieve_ir_for_inlining(mi, src, preserve_local_sources)
     add_inlining_backedge!(et, mi)
@@ -1506,7 +1507,7 @@ function semiconcrete_result_item(result::SemiConcreteResult,
         return compileable_specialization(mi, result.effects, et, info;
             compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
     end
-    inlining_policy(state.interp, result.ir, info, flag) ||
+    src_inlining_policy(state.interp, result.ir, info, flag) ||
         return compileable_specialization(mi, result.effects, et, info;
             compilesig_invokes=OptimizationParams(state.interp).compilesig_invokes)
 

@@ -368,6 +368,8 @@ function maybe_compress_codeinfo(interp::AbstractInterpreter, linfo::MethodInsta
     end
 end
 
+function transform_result_for_cache end # deprecated -- present for Cthulhu
+
 function cache_result!(interp::AbstractInterpreter, result::InferenceResult)
     valid_worlds = result.valid_worlds
     if last(valid_worlds) == get_world_counter()

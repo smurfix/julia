@@ -334,7 +334,7 @@ function CC.abstract_call(interp::NoinlineInterpreter,
     end
     return ret
 end
-function CC.inlining_policy(interp::NoinlineInterpreter,
+function CC.src_inlining_policy(interp::NoinlineInterpreter,
     @nospecialize(src), @nospecialize(info::CallInfo), stmt_flag::UInt32)
     if isa(info, NoinlineCallInfo)
         return false

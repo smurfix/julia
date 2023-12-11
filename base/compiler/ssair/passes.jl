@@ -1362,7 +1362,7 @@ function try_inline_finalizer!(ir::IRCode, argexprs::Vector{Any}, idx::Int,
         return false
     end
 
-    inlining_policy(inlining.interp, src, info, IR_FLAG_NULL) || return false
+    src_inlining_policy(inlining.interp, src, info, IR_FLAG_NULL) || return false
     src, di = retrieve_ir_for_inlining(code, src)
 
     # For now: Require finalizer to only have one basic block

@@ -260,54 +260,52 @@ function compute_ir_line_annotations(code::IRCode)
             lineno = stack[1].line
             x = min(length(last_stack), length(stack))
             depth = length(stack) - 1
-            if true
-                # Compute the last depth that was in common
-                first_mismatch = let last_stack=last_stack
-                    findfirst(i->last_stack[i] != stack[i], 1:x)
-                end
-                # If the first mismatch is the last stack frame, that might just
-                # be a line number mismatch in inner most frame. Ignore those
-                if length(last_stack) == length(stack) && first_mismatch == length(stack)
-                    last_entry, entry = last_stack[end], stack[end]
-                    if method_name(last_entry) === method_name(entry) && last_entry.file === entry.file
-                        first_mismatch = nothing
-                    end
-                end
-                last_depth = something(first_mismatch, x+1)-1
-                if min(depth, last_depth) > last_printed_depth
-                    printing_depth = min(depth, last_printed_depth + 1)
-                    last_printed_depth = printing_depth
-                elseif length(stack) > length(last_stack) || first_mismatch !== nothing
-                    printing_depth = min(depth, last_depth + 1)
-                    last_printed_depth = printing_depth
-                else
-                    printing_depth = 0
-                end
-                stole_one = false
-                if printing_depth != 0
-                    for _ in 1:(printing_depth-1)
-                        print(buf, "│")
-                    end
-                    if printing_depth <= last_depth-1 && first_mismatch === nothing
-                        print(buf, "┃")
-                        for _ in printing_depth+1:min(depth, last_depth)
-                            print(buf, "│")
-                        end
-                    else
-                        stole_one = true
-                        print(buf, "╻")
-                    end
-                else
-                    for _ in 1:min(depth, last_depth)
-                        print(buf, "│")
-                    end
-                end
-                print(buf, "╷"^max(0, depth - last_depth - stole_one))
-                if printing_depth != 0
-                    loc_method = normalize_method_name(stack[printing_depth + 1])
-                end
-                loc_method = string(" "^printing_depth, loc_method)
+            # Compute the last depth that was in common
+            first_mismatch = let last_stack=last_stack
+                findfirst(i->last_stack[i] != stack[i], 1:x)
             end
+            # If the first mismatch is the last stack frame, that might just
+            # be a line number mismatch in inner most frame. Ignore those
+            if length(last_stack) == length(stack) && first_mismatch == length(stack)
+                last_entry, entry = last_stack[end], stack[end]
+                if method_name(last_entry) === method_name(entry) && last_entry.file === entry.file
+                    first_mismatch = nothing
+                end
+            end
+            last_depth = something(first_mismatch, x+1)-1
+            if min(depth, last_depth) > last_printed_depth
+                printing_depth = min(depth, last_printed_depth + 1)
+                last_printed_depth = printing_depth
+            elseif length(stack) > length(last_stack) || first_mismatch !== nothing
+                printing_depth = min(depth, last_depth + 1)
+                last_printed_depth = printing_depth
+            else
+                printing_depth = 0
+            end
+            stole_one = false
+            if printing_depth != 0
+                for _ in 1:(printing_depth-1)
+                    print(buf, "│")
+                end
+                if printing_depth <= last_depth-1 && first_mismatch === nothing
+                    print(buf, "┃")
+                    for _ in printing_depth+1:min(depth, last_depth)
+                        print(buf, "│")
+                    end
+                else
+                    stole_one = true
+                    print(buf, "╻")
+                end
+            else
+                for _ in 1:min(depth, last_depth)
+                    print(buf, "│")
+                end
+            end
+            print(buf, "╷"^max(0, depth - last_depth - stole_one))
+            if printing_depth != 0
+                loc_method = normalize_method_name(stack[printing_depth + 1])
+            end
+            loc_method = string(" "^printing_depth, loc_method)
             last_stack = stack
         end
         push!(loc_annotations, String(take!(buf)))
@@ -381,6 +379,13 @@ end
 function buildLineInfoNode(debuginfo, @nospecialize(def), pc::Int)
     DI = LineInfoNode[]
     pc == 0 && return DI
+    let codeloc = getdebugidx(debuginfo, pc)
+        line::Int = codeloc[1]
+        line < 0 && return DI # broken or disabled debug info?
+        if line == 0 && codeloc[2] == 0
+            return DI # no update
+        end
+    end
     function append_scopes!(scopes::Vector{LineInfoNode}, pc::Int, debuginfo, @nospecialize(def))
         while true
             debuginfo.def isa Symbol || (def = debuginfo.def)
