@@ -362,11 +362,6 @@ static void jl_encode_value_(jl_ircode_state *s, jl_value_t *v, int as_literal) 
         write_uint8(s->s, TAG_UINT8);
         write_int8(s->s, *(int8_t*)jl_data_ptr(v));
     }
-    else if (jl_typetagis(v, jl_lineinfonode_type)) {
-        write_uint8(s->s, TAG_LINEINFO);
-        for (i = 0; i < jl_datatype_nfields(jl_lineinfonode_type); i++)
-            jl_encode_value(s, jl_get_nth_field(v, i));
-    }
     else if (((jl_datatype_t*)jl_typeof(v))->instance == v) {
         write_uint8(s->s, TAG_SINGLETON);
         jl_encode_value(s, jl_typeof(v));
@@ -662,7 +657,7 @@ static jl_value_t *jl_decode_value(jl_ircode_state *s) JL_GC_DISABLED
 {
     assert(!ios_eof(s->s));
     jl_value_t *v;
-    size_t i, n;
+    size_t n;
     uint64_t key;
     uint8_t tag = read_uint8(s->s);
     if (tag > LAST_TAG)
@@ -772,13 +767,6 @@ static jl_value_t *jl_decode_value(jl_ircode_state *s) JL_GC_DISABLED
         n = read_int32(s->s);
         v = jl_alloc_string(n);
         ios_readall(s->s, jl_string_data(v), n);
-        return v;
-    case TAG_LINEINFO:
-        v = jl_new_struct_uninit(jl_lineinfonode_type);
-        for (i = 0; i < jl_datatype_nfields(jl_lineinfonode_type); i++) {
-            //size_t offs = jl_field_offset(jl_lineinfonode_type, i);
-            set_nth_field(jl_lineinfonode_type, v, i, jl_decode_value(s), 0);
-        }
         return v;
     default:
         assert(tag == TAG_GENERAL || tag == TAG_SHORT_GENERAL);
@@ -1422,7 +1410,6 @@ void jl_init_serializer(void)
     deser_tag[TAG_INT32] = (jl_value_t*)jl_int32_type;
     deser_tag[TAG_INT64] = (jl_value_t*)jl_int64_type;
     deser_tag[TAG_UINT8] = (jl_value_t*)jl_uint8_type;
-    deser_tag[TAG_LINEINFO] = (jl_value_t*)jl_lineinfonode_type;
     deser_tag[TAG_UNIONALL] = (jl_value_t*)jl_unionall_type;
     deser_tag[TAG_GOTONODE] = (jl_value_t*)jl_gotonode_type;
     deser_tag[TAG_QUOTENODE] = (jl_value_t*)jl_quotenode_type;

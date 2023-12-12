@@ -359,20 +359,26 @@ function debuginfo_firstline(debuginfo::Union{Core.DebugInfo,DebugInfoStream})
 end
 
 ## utility function to extract the line number at a particular program counter (ignoring inlining)
-## corresponds to debuginfo_file
-#function debuginfo_line(debuginfo::Union{Core.DebugInfo,DebugInfoStream}, pc::Int)
-#    while pc > 0
-#        codeloc = getdebugidx(debuginfo, pc)
-#        pc::Int = codeloc[1]
-#        debuginfo = debuginfo.linetable
-#        if debuginfo === nothing || pc <= 0
-#            return pc
-#        end
-#    end
-#    return -1
-#end
+## corresponds to debuginfo_file. return <= 0 if there is no line number change caused by this statement
+function debuginfo_line(debuginfo::Union{Core.DebugInfo,DebugInfoStream}, pc::Int)
+    while pc > 0
+        codeloc = getdebugidx(debuginfo, pc)
+        pc::Int = codeloc[1]
+        debuginfo = debuginfo.linetable
+        if debuginfo === nothing || pc <= 0
+            return pc
+        end
+    end
+    return -1
+end
 ## alternative definition of debuginfo_firstline which gets the line for the first existing pc, rather that the first line
 #debuginfo_firstline(debuginfo::Union{Core.DebugInfo,DebugInfoStream}) = deubginfo_line(debuginfo, 1)
+
+struct LineInfoNode
+    method # ::Union{Method,MethodInstance,Symbol}
+    file::Symbol
+    line::Int32
+end
 
 # utility function for converting a debuginfo object a particular pc to list of LineInfoNodes representing the inlining info at that pc for function `def`
 # which is either `nothing` (macro-expand), a module (top-level), a Method (unspecialized code) or a MethodInstance (specialized code)
@@ -393,7 +399,7 @@ function buildLineInfoNode(debuginfo, @nospecialize(def), pc::Int)
             line::Int = codeloc[1]
             line < 0 && return # broken or disabled debug info?
             if debuginfo.linetable === nothing || line == 0
-                push!(scopes, LineInfoNode(Main, def, debuginfo_file1(debuginfo), Int32(line), Int32(0))) # only populate method/file/line fields
+                push!(scopes, LineInfoNode(def, debuginfo_file1(debuginfo), Int32(line)))
             else
                 append_scopes!(scopes, line, debuginfo.linetable::Core.DebugInfo, def)
             end

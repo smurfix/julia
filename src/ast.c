@@ -576,18 +576,16 @@ static jl_value_t *scm_to_julia_(fl_context_t *fl_ctx, value_t e, jl_module_t *m
             JL_GC_POP();
             return temp;
         }
-        else if (sym == jl_lineinfo_sym && n == 4) {
-            jl_value_t *name=NULL, *file=NULL, *linenum=NULL, *inlinedat=NULL;
-            JL_GC_PUSH4(&name, &file, &linenum, &inlinedat);
+        else if (sym == jl_lineinfo_sym && n == 3) {
+            jl_value_t *file=NULL, *linenum=NULL, *inlinedat=NULL;
+            JL_GC_PUSH3(&file, &linenum, &inlinedat);
             value_t lst = e;
-            name = scm_to_julia_(fl_ctx, car_(lst), mod);
-            lst = cdr_(lst);
             file = scm_to_julia_(fl_ctx, car_(lst), mod);
             lst = cdr_(lst);
             linenum = scm_to_julia_(fl_ctx, car_(lst), mod);
             lst = cdr_(lst);
             inlinedat = scm_to_julia_(fl_ctx, car_(lst), mod);
-            temp = jl_new_struct(jl_lineinfonode_type, mod, name, file, linenum, inlinedat);
+            temp = jl_new_struct(jl_lineinfonode_type, file, linenum, inlinedat);
             JL_GC_POP();
             return temp;
         }

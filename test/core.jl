@@ -8044,10 +8044,6 @@ end
 @test Core.Compiler.is_foldable(Base.infer_effects(length, (Core.SimpleVector,)))
 @test Core.Compiler.is_foldable(Base.infer_effects(getindex, (Core.SimpleVector,Int)))
 
-let lin = Core.LineInfoNode(Base, first(methods(convert)), :foo, Int32(5), Int32(0))
-    @test convert(LineNumberNode, lin) == LineNumberNode(5, :foo)
-end
-
 # Test that a nothrow-globalref doesn't get outlined during lowering
 module WellKnownGlobal
     global well_known = 1

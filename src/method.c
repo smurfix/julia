@@ -311,8 +311,8 @@ static jl_value_t *alloc_edges(arraylist_t *edges_list)
 static void add_edge(arraylist_t *edges_list, arraylist_t *inlinestack, int32_t *p_to, int32_t *p_pc)
 {
     jl_value_t *locinfo = (jl_value_t*)arraylist_pop(inlinestack);
-    jl_sym_t *filesym = (jl_sym_t*)jl_fieldref_noalloc(locinfo, 2);
-    int32_t line = jl_unbox_int32(jl_fieldref(locinfo, 3));
+    jl_sym_t *filesym = (jl_sym_t*)jl_fieldref_noalloc(locinfo, 0);
+    int32_t line = jl_unbox_int32(jl_fieldref(locinfo, 1));
     size_t i;
     arraylist_t *edge = NULL;
     for (i = 0; i < edges_list->len; i++) {
@@ -354,7 +354,7 @@ jl_debuginfo_t *jl_linetable_to_debuginfo(jl_array_t *codelocs_any, jl_array_t *
 {
     size_t nlocs = jl_array_nrows(codelocs_any);
     jl_value_t *toplocinfo = jl_array_ptr_ref(linetable, 0);
-    jl_sym_t *topfile = (jl_sym_t*)jl_fieldref_noalloc(toplocinfo, 2);
+    jl_sym_t *topfile = (jl_sym_t*)jl_fieldref_noalloc(toplocinfo, 0);
     arraylist_t inlinestack;
     arraylist_new(&inlinestack, 0);
     arraylist_t edges_list;
@@ -369,15 +369,15 @@ jl_debuginfo_t *jl_linetable_to_debuginfo(jl_array_t *codelocs_any, jl_array_t *
         size_t lineidx = jl_unbox_long(jl_array_ptr_ref((jl_array_t*)codelocs_any, j)); // 1 indexed!
         while (lineidx != 0) {
             jl_value_t *locinfo = jl_array_ptr_ref(linetable, lineidx - 1);
-            lineidx = jl_unbox_int32(jl_fieldref(locinfo, 4));
+            lineidx = jl_unbox_int32(jl_fieldref(locinfo, 2));
             arraylist_push(&inlinestack, locinfo);
         }
         int32_t line = 0, to = 0, pc = 0;
         if (inlinestack.len) {
             jl_value_t *locinfo = (jl_value_t*)arraylist_pop(&inlinestack);
-            jl_sym_t *filesym = (jl_sym_t*)jl_fieldref_noalloc(locinfo, 2);
+            jl_sym_t *filesym = (jl_sym_t*)jl_fieldref_noalloc(locinfo, 0);
             if (filesym == topfile)
-                line = jl_unbox_int32(jl_fieldref(locinfo, 3));
+                line = jl_unbox_int32(jl_fieldref(locinfo, 1));
             else
                 arraylist_push(&inlinestack, locinfo);
             if (inlinestack.len) {

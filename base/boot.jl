@@ -125,9 +125,7 @@
 #    file::Union{Symbol,Nothing}
 #end
 
-#struct LineInfoNode
-#    module::Module
-#    method::Any (Union{Symbol, Method, MethodInstance})
+#struct LegacyLineInfoNode
 #    file::Symbol
 #    line::Int32
 #    inlined_at::Int32
@@ -475,8 +473,8 @@ eval(Core, quote
         isa(f, String) && (f = Symbol(f))
         return $(Expr(:new, :LineNumberNode, :l, :f))
     end
-    LineInfoNode(mod::Module, @nospecialize(method), file::Symbol, line::Int32, inlined_at::Int32) =
-        $(Expr(:new, :LineInfoNode, :mod, :method, :file, :line, :inlined_at))
+    LegacyLineInfoNode(file::Symbol, line::Int32, inlined_at::Int32) =
+        $(Expr(:new, :LegacyLineInfoNode, :file, :line, :inlined_at))
     DebugInfo(def::Union{Method,MethodInstance,Symbol}, linetable::Union{Nothing,DebugInfo}, edges::SimpleVector, codelocs::String) =
         $(Expr(:new, :DebugInfo, :def, :linetable, :edges, :codelocs))
     DebugInfo(def::Union{Method,MethodInstance,Symbol}) =
@@ -637,12 +635,12 @@ module IR
 
 export CodeInfo, MethodInstance, CodeInstance, GotoNode, GotoIfNot, ReturnNode,
     NewvarNode, SSAValue, SlotNumber, Argument,
-    PiNode, PhiNode, PhiCNode, UpsilonNode, LineInfoNode, DebugInfo,
+    PiNode, PhiNode, PhiCNode, UpsilonNode, DebugInfo,
     Const, PartialStruct, InterConditional, EnterNode
 
 using Core: CodeInfo, MethodInstance, CodeInstance, GotoNode, GotoIfNot, ReturnNode,
     NewvarNode, SSAValue, SlotNumber, Argument,
-    PiNode, PhiNode, PhiCNode, UpsilonNode, LineInfoNode, DebugInfo,
+    PiNode, PhiNode, PhiCNode, UpsilonNode, DebugInfo,
     Const, PartialStruct, InterConditional, EnterNode
 
 end # module IR

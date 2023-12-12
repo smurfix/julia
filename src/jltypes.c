@@ -3051,10 +3051,10 @@ void jl_init_types(void) JL_GC_DISABLED
                         jl_emptysvec, 0, 0, 2);
 
     jl_lineinfonode_type =
-        jl_new_datatype(jl_symbol("LineInfoNode"), core, jl_any_type, jl_emptysvec,
-                        jl_perm_symsvec(5, "module", "method", "file", "line", "inlined_at"),
-                        jl_svec(5, jl_module_type, jl_any_type, jl_symbol_type, jl_int32_type, jl_int32_type),
-                        jl_emptysvec, 0, 0, 5);
+        jl_new_datatype(jl_symbol("LegacyLineInfoNode"), core, jl_any_type, jl_emptysvec,
+                        jl_perm_symsvec(3, "file", "line", "inlined_at"),
+                        jl_svec(3, jl_symbol_type, jl_int32_type, jl_int32_type),
+                        jl_emptysvec, 0, 0, 3);
 
     jl_gotonode_type =
         jl_new_datatype(jl_symbol("GotoNode"), core, jl_any_type, jl_emptysvec,
@@ -3499,9 +3499,6 @@ void jl_init_types(void) JL_GC_DISABLED
     jl_module_type->ismutationfree = 1;
     // Module object identity is determined by its name and parent name.
     jl_module_type->isidentityfree = 1;
-
-    // override the preferred layout for a couple types
-    jl_lineinfonode_type->name->mayinlinealloc = 0; // FIXME: assumed to be a pointer by codegen
 
     export_jl_small_typeof();
 }

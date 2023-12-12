@@ -1142,7 +1142,7 @@ function deserialize(s::AbstractSerializer, ::Type{Core.MethodInstance})
     return linfo
 end
 
-function deserialize(s::AbstractSerializer, ::Type{Core.LineInfoNode})
+function deserialize(s::AbstractSerializer, ::Type{Core.LegacyLineInfoNode})
     mod = deserialize(s)
     if mod isa Module
         method = deserialize(s)
@@ -1151,7 +1151,7 @@ function deserialize(s::AbstractSerializer, ::Type{Core.LineInfoNode})
         method = mod
         mod = Main
     end
-    return Core.LineInfoNode(mod, method, deserialize(s)::Symbol, Int32(deserialize(s)::Union{Int32, Int}), Int32(deserialize(s)::Union{Int32, Int}))
+    return Core.LegacyLineInfoNode(deserialize(s)::Symbol, Int32(deserialize(s)::Union{Int32, Int}), Int32(deserialize(s)::Union{Int32, Int}))
 end
 
 function deserialize(s::AbstractSerializer, ::Type{PhiNode})
