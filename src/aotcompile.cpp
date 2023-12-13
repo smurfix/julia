@@ -1835,7 +1835,7 @@ extern "C" JL_DLLEXPORT_CODEGEN jl_code_info_t *jl_gdbdumpcode(jl_method_instanc
     jl_get_llvmf_defn(&llvmf_dump, mi, world, 0, false, jl_default_cgparams);
     if (llvmf_dump.F) {
         jl_value_t *ir = jl_dump_function_ir(&llvmf_dump, 0, 1, "source");
-        jl_printf(stream, "%s", ir);
+        jl_static_show(stream, ir);
     }
     jl_printf(stream, "----\n");
 
