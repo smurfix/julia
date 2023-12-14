@@ -752,6 +752,7 @@ static int mark_reset_age = 0;
 
 static int64_t scanned_bytes; // young bytes scanned while marking
 static int64_t perm_scanned_bytes; // old bytes scanned while marking
+static int64_t stack_nbytes; // number of bytes resident on task stacks
 int prev_sweep_full = 1;
 int current_sweep_full = 0;
 int under_pressure = 0;
@@ -3333,6 +3334,15 @@ double jl_gc_smooth(uint64_t old_val, uint64_t new_val, double factor)
     return factor * old_val + (1.0-factor) * new_val;
 }
 
+void gc_update_stack_nbytes(void) JL_NOTSAFEPOINT
+{
+    live_bytes -= stack_nbytes;
+    jl_atomic_fetch_add(&gc_heap_stats.heap_size, -stack_nbytes);
+    stack_nbytes = total_stack_nbytes();
+    live_bytes += stack_nbytes;
+    jl_atomic_fetch_add(&gc_heap_stats.heap_size, stack_nbytes);
+}
+
 size_t jl_maxrss(void);
 
 // Only one thread should be running in this function
@@ -3482,6 +3492,7 @@ static int _jl_gc_collect(jl_ptls_t ptls, jl_gc_collection_t collection)
         // on the first collection after sweep_full, and the current scan
         perm_scanned_bytes = 0;
         promoted_bytes = 0;
+        gc_update_stack_nbytes();
     }
     scanned_bytes = 0;
     // 6. start sweeping
