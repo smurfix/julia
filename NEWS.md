@@ -51,6 +51,7 @@ This is intended to unify script and compilation workflows, where code loading m
 in the compiler and execution of `Main.main` may happen in the resulting executable. For interactive use, there is no semantic
 difference between defining a `main` function and executing the code directly at the end of the script ([50974]).
 * The `-m/--module` flag can be passed to run the `main` function inside a package with a set of arguments.
+  This `main` function should be declared using `@main` to indicate that it is an entry point.
 
 Multi-threading changes
 -----------------------
