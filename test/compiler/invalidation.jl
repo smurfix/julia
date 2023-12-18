@@ -47,14 +47,14 @@ basic_caller(x) = basic_callee(x)
     basic_caller(x)
 end |> only === Float64
 
-let mi = only(Base.specializations(only(methods(basic_callee))))
+let mi = Base.method_instance(basic_callee, ())
     ci = mi.cache
     @test !isdefined(ci, :next)
     @test ci.owner === InvalidationTesterToken()
     @test ci.max_world == typemax(UInt)
 end
 
-let mi = only(Base.specializations(only(methods(basic_caller))))
+let mi = Base.method_instance(basic_caller, ())
     ci = mi.cache
     @test !isdefined(ci, :next)
     @test ci.owner === InvalidationTesterToken()
@@ -64,8 +64,8 @@ end
 # this redefinition below should invalidate the cache
 const BASIC_CALLER_WORLD = Base.get_world_counter()
 basic_callee(x) = x, x
-@test isempty(Base.specializations(only(methods(basic_callee))))
-let mi = only(Base.specializations(only(methods(basic_caller))))
+@test Base.method_instance(basic_callee, ()) === nothing
+let mi = Base.method_instance(basic_caller, ())
     ci = mi.cache
     @test !isdefined(ci, :next)
     @test ci.owner === InvalidationTesterToken()
@@ -76,14 +76,14 @@ end
 @test Base.return_types((Float64,); interp=InvalidationTester()) do x
     basic_caller(x)
 end |> only === Tuple{Float64,Float64}
-let mi = only(Base.specializations(only(methods(basic_callee))))
+let mi = Base.method_instance(basic_callee, ())
     ci = mi.cache
     @test !isdefined(ci, :next)
     @test ci.owner === InvalidationTesterToken()
     @test ci.max_world == typemax(UInt)
 end
 
-let mi = only(Base.specializations(only(methods(basic_caller))))
+let mi = Base.method_instance(basic_caller, ())
     ci = mi.cache
     @test isdefined(ci, :next)
     @test ci.owner === InvalidationTesterToken()
@@ -121,7 +121,7 @@ begin take!(GLOBAL_BUFFER)
         @test any(iscall((src, pr48932_callee)), src.code)
     end
 
-    let mi = only(Base.specializations(only(methods(pr48932_callee))))
+    let mi = Base.method_instance(pr48932_callee, ())
         ci = mi.cache
         @test isdefined(ci, :next)
         @test ci.owner === InvalidationTesterToken()
@@ -133,7 +133,7 @@ begin take!(GLOBAL_BUFFER)
         @test ci.owner === nothing
         @test ci.max_world == typemax(UInt)
     end
-    let mi = only(Base.specializations(only(methods(pr48932_caller))))
+    let mi =  Base.method_instance(pr48932_caller, ())
         ci = mi.cache
         @test !isdefined(ci, :next)
         @test ci.owner === InvalidationTesterToken()
@@ -147,8 +147,8 @@ begin take!(GLOBAL_BUFFER)
     # this redefinition below should invalidate the cache of `pr48932_callee` but not that of `pr48932_caller`
     pr48932_callee(x) = (print(GLOBAL_BUFFER, x); nothing)
 
-    @test isempty(Base.specializations(only(methods(pr48932_callee))))
-    let mi = only(Base.specializations(only(methods(pr48932_caller))))
+    @test Base.method_instance(pr48932_callee, ()) === nothing
+    let mi = Base.method_instance(pr48932_caller, ())
         ci = mi.cache
         @test isdefined(ci, :next)
         @test ci.owner === nothing
@@ -186,7 +186,7 @@ begin take!(GLOBAL_BUFFER)
         @test any(iscall((src, pr48932_callee_inferable)), src.code)
     end
 
-    let mi = only(Base.specializations(only(methods(pr48932_callee_inferable))))
+    let mi = Base.method_instance(pr48932_callee_inferable, ())
         ci = mi.cache
         @test isdefined(ci, :next)
         @test ci.owner === InvalidationTesterToken()
@@ -196,7 +196,7 @@ begin take!(GLOBAL_BUFFER)
         @test ci.owner === nothing
         @test ci.max_world == typemax(UInt)
     end
-    let mi = only(Base.specializations(only(methods(pr48932_caller_unuse))))
+    let mi = Base.method_instance(pr48932_caller_unuse, ())
         ci = mi.cache
         @test !isdefined(ci, :next)
         @test ci.owner === InvalidationTesterToken()
@@ -210,8 +210,8 @@ begin take!(GLOBAL_BUFFER)
     # this redefinition below should invalidate the cache of `pr48932_callee_inferable` but not that of `pr48932_caller_unuse`
     pr48932_callee_inferable(x) = (print(GLOBAL_BUFFER, "foo"); x)
 
-    @test isempty(Base.specializations(only(methods(pr48932_callee_inferable))))
-    let mi = only(Base.specializations(only(methods(pr48932_caller_unuse))))
+    @test Base.method_instance(pr48932_callee_inferable, ()) === nothing
+    let mi = Base.method_instance(pr48932_caller_unuse, ())
         ci = mi.cache
         @test isdefined(ci, :next)
         @test ci.owner === nothing
@@ -246,7 +246,7 @@ begin take!(GLOBAL_BUFFER)
         @test any(isinvoke(:pr48932_callee_inlined), src.code)
     end
 
-    let mi = only(Base.specializations(only(methods(pr48932_callee_inlined))))
+    let mi = Base.method_instance(pr48932_callee_inlined, ())
         ci = mi.cache
         @test isdefined(ci, :next)
         @test ci.owner === InvalidationTesterToken()
@@ -256,7 +256,7 @@ begin take!(GLOBAL_BUFFER)
         @test ci.owner === nothing
         @test ci.max_world == typemax(UInt)
     end
-    let mi = only(Base.specializations(only(methods(pr48932_caller_inlined))))
+    let mi = Base.method_instance(pr48932_caller_inlined, ())
         ci = mi.cache
         @test !isdefined(ci, :next)
         @test ci.owner === InvalidationTesterToken()
@@ -270,8 +270,8 @@ begin take!(GLOBAL_BUFFER)
     # this redefinition below should invalidate the cache of `pr48932_callee_inlined` but not that of `pr48932_caller_inlined`
     @noinline pr48932_callee_inlined(@nospecialize x) = (print(GLOBAL_BUFFER, x); nothing)
 
-    @test isempty(Base.specializations(only(methods(pr48932_callee_inlined))))
-    let mi = only(Base.specializations(only(methods(pr48932_caller_inlined))))
+    @test Base.method_instance(pr48932_callee_inlined, ()) === nothing
+    let mi = Base.method_instance(pr48932_caller_inlined, ())
         ci = mi.cache
         @test isdefined(ci, :next)
         @test ci.owner === nothing
