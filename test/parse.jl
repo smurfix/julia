@@ -337,14 +337,30 @@ end
 end
 
 @testset "parse types" begin
-    @test parse(DataType, "Int") === Int
-    @test parse(DataType, "Main.Base.Vector{Base.Dict{Int, Base.Float64}}") === Vector{Dict{Int, Float64}}
-    @test parse(DataType, "TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}") ===
-                           TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
-    m = Module()
-    Core.eval(m, :(using Main.TestModule: Inner))
-    @test Core.eval(m, quote
-        parse(DataType, "Inner.X{Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}")
-    end) ===             Inner.X{Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
+    @testset "parse DataTypes" begin
+        @test parse(DataType, "Int") === Int
+        @test parse(DataType, "Main.Base.Vector{Base.Dict{Int, Base.Float64}}") === Vector{Dict{Int, Float64}}
+        @test parse(DataType, "TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}") ===
+                               TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
+        m = Module()
+        Core.eval(m, :(using Main.TestModule: Inner))
+        @test Core.eval(m, quote
+            parse(DataType, "Inner.X{Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}")
+        end) ===             Inner.X{Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
 
+        @test parse(Type, "Int") === Int
+        @test parse(Type, "Main.Base.Vector{Base.Dict{Int, Base.Float64}}") === Vector{Dict{Int, Float64}}
+        @test parse(Type, "TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}") ===
+                           TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
+    end
+
+    @test parse(Type, "Vector") === Vector == Vector{<:Any}
+
+    @test_broken parse(Type, "Vector{<:Number}") == Vector{<:Number}
+    @test parse(Type, "Vector{T} where T<:Number") == Vector{<:Number}
+    @test_broken parse(Type, "Main.Vector{S} where {Int<:T<:Number, S<:T}") == Vector{S} where {Int64<:T<:Number, S<:T}
+
+    @test parse(Type{Vector}, "Vector") === Vector == Vector{<:Any}
+    @test_throws TypeError parse(Type{Vector}, "Vector{Int}")
+    @test parse(Type{<:Vector}, "Vector{Int}") === Vector{Int}
 end
