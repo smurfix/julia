@@ -329,3 +329,22 @@ end
         @test isequal(parse(Float64, s), sign(v))
     end
 end
+
+module TestModule
+module Inner
+struct X{A,B,C} end
+end
+end
+
+@testset "parse types" begin
+    @test parse(DataType, "Int") === Int
+    @test parse(DataType, "Main.Base.Vector{Base.Dict{Int, Base.Float64}}") === Vector{Dict{Int, Float64}}
+    @test parse(DataType, "TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}") ===
+                           TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
+    m = Module()
+    Core.eval(m, :(using Main.TestModule: Inner))
+    @test Core.eval(m, quote
+        parse(DataType, "Inner.X{Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}")
+    end) ===             Inner.X{Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
+
+end
