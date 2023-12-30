@@ -12,36 +12,30 @@ _unnamed_type_var() = Symbol("#s$(gensym())")
 
 function _parse_type(ast; type_vars = nothing)
     if ast isa Expr && ast.head == :curly
+        # If the type expression has type parameters, iterate the params, evaluating them
+        # recursively, and finally construct the output type with the evaluated params.
+
         typ = _parse_qualified_type(ast.args[1], type_vars)
-        # PERF: Reuse the vector to save allocations
-        #type_vars === nothing && (type_vars = Dict{Symbol, TypeVar}())
+        # If any of the type parameters are unnamed type restrictions, like `<:Number`, we
+        # will construct new anonymous type variables for them, and wrap the returned type
+        # in a UnionAll.
         new_type_vars = Vector{TypeVar}()
+        # PERF: Reuse the vector to save allocations
         for i in 2:length(ast.args)
             arg = ast.args[i]
             if arg isa Expr && arg.head === :(<:) && length(arg.args) == 1
                 # Change `Vector{<:Number}` to `Vector{#s#27} where #s#27<:Number`
                 type_var = TypeVar(_unnamed_type_var(), _parse_type(arg.args[1]; type_vars))
                 push!(new_type_vars, type_var)
-                # We've consumed this type parameter, so remove it from the AST
-                #popfirst!(ast.args)
                 ast.args[i] = type_var
-                #pushfirst!(arg.args, type_var)
-                #type_vars[type_var.name] = type_var
-        #@show type_vars
-               #body = typ{type_var}
-               #typ = UnionAll(type_var, body)
-
-                # ast.args[i] = TypeVar(gensym("s"), _parse_type(ast.args[i].args[1]; type_vars))
             else
                 ast.args[i] = _parse_type(ast.args[i]; type_vars)
             end
         end
         # PERF: Drop the first element, instead of args[2:end], to avoid a new sub-vector
         popfirst!(ast.args)
-        #@show typ
-        #@show ast.args
         body = typ{ast.args...}
-        #@show new_type_vars
+        # Handle any new type vars we created
         if !isempty(new_type_vars)
             # Now work backwards through the new type vars and construct our wrapper UnionAlls:
             for type_var in reverse(new_type_vars)
