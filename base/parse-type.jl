@@ -45,10 +45,13 @@ function _parse_type(ast; type_vars = nothing)
         return body
     elseif ast isa Expr && ast.head == :call && ast.args[1] === :typeof
         return typeof(_parse_type(ast.args[2]; type_vars))
+    elseif ast isa Expr && ast.head == :call
+        return _parse_isbits_constructor(ast, type_vars)
     else
         return _parse_qualified_type(ast, type_vars)
     end
 end
+_parse_qualified_type(val, _) = val
 function _parse_qualified_type(ast::Expr, type_vars)
     @assert ast.head === :(.) "Failed to parse type expression. Expected a \
             qualified type, e.g. `Base.Dict`, got: `$ast`"
@@ -70,6 +73,19 @@ function _parse_qualified_type(sym::Symbol, type_vars)
     #@show type_vars
     # Otherwise, look up the symbol in Main
     getglobal(Main, sym)
+end
+
+# Parses constant isbits constructor expressions, like `Int32(10)` or `Point(0,0)`, as used in type
+# parameters like `Val{10}()` or `DefaultDict{Point(0,0)}`.
+function _parse_isbits_constructor(ast, type_vars)
+    typ = _parse_type(ast.args[1]; type_vars)
+    # PERF: Reuse the args vector when parsing the type values.
+    popfirst!(ast.args)
+    for i in 1:length(ast.args)
+        ast.args[i] = _parse_type(ast.args[i]; type_vars)
+    end
+    # We use reinterpret to avoid evaluating code, which may have side effects.
+    return reinterpret(typ, Tuple(ast.args))
 end
 
 _parse_type_var(ast::Symbol, _type_vars) = Core.TypeVar(ast)
