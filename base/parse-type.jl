@@ -17,8 +17,8 @@ function _parse_type(ast; type_vars = nothing)
                 type_var = TypeVar(gensym("s"), _parse_type(ast.args[i].args[2]; type_vars))
                 pushfirst!(ast.args[i].args, type_var)
                 type_vars[type_var.name] = type_var
-        @show type_vars
-        @show ast.args[i]
+        #@show type_vars
+        #@show ast.args[i]
                body = _parse_type(ast.args[i]; type_vars)
                ast.args[i] = UnionAll(type_var, body)
 
@@ -39,7 +39,7 @@ function _parse_type(ast; type_vars = nothing)
         end
         # Then evaluate the body in the context of those type vars
         body = _parse_type(ast.args[1]; type_vars)
-        for (name, type_var) in type_vars
+        for (_, type_var) in type_vars
             body = UnionAll(type_var, body)
         end
         return body
@@ -72,7 +72,7 @@ function _parse_qualified_type(sym::Symbol, type_vars)
     getglobal(Main, sym)
 end
 
-_parse_type_var(ast::Symbol, type_vars) = Core.TypeVar(ast)
+_parse_type_var(ast::Symbol, _type_vars) = Core.TypeVar(ast)
 function _parse_type_var(ast::Expr, type_vars)
     if ast.head === :(<:)
         return Core.TypeVar(ast.args[1], _parse_type(ast.args[2]; type_vars))
