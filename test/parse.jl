@@ -368,4 +368,7 @@ end
 
     @test parse(Type, "typeof(+)") === typeof(+)
     @test parse(Type, "typeof(Main.Base.:(+))") === typeof(+)
+
+    var"##1#2#3##"() = 2+2
+    @test parse(Type, """typeof(var"##1#2#3##")""") === typeof(var"##1#2#3##")
 end
