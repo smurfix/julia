@@ -363,4 +363,9 @@ end
     @test parse(Type{Vector}, "Vector") === Vector == Vector{<:Any}
     @test_throws TypeError parse(Type{Vector}, "Vector{Int}")
     @test parse(Type{<:Vector}, "Vector{Int}") === Vector{Int}
+
+    @test parse(Type, "Union{Int, Float64}") === Union{Int, Float64}
+
+    @test parse(Type, "typeof(+)") === typeof(+)
+    @test parse(Type, "typeof(Main.Base.:(+))") === typeof(+)
 end

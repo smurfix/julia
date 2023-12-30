@@ -43,6 +43,8 @@ function _parse_type(ast; type_vars = nothing)
             body = UnionAll(type_var, body)
         end
         return body
+    elseif ast isa Expr && ast.head == :call && ast.args[1] === :typeof
+        return typeof(_parse_type(ast.args[2]; type_vars))
     else
         return _parse_qualified_type(ast, type_vars)
     end
