@@ -2,6 +2,9 @@
 function Base.parse(::Type{T}, str::AbstractString) where T<:Type
     ast = Meta.parse(str)
     v = _parse_type(ast)
+    if v === nothing
+        throw(ArgumentError("invalid type expression: $str"))
+    end
     # Don't pay for the assertion if not needed (~2 μs)
     T === Type && return v
     return v::T
@@ -10,7 +13,7 @@ end
 # NOTE: This pattern is a hard-coded part of types: unnamed type variables start with `#s`.
 _unnamed_type_var() = Symbol("#s$(gensym())")
 
-function _parse_type(ast; type_vars = nothing)
+function _parse_type(ast, type_vars = nothing)
     if ast isa Expr && ast.head == :curly
         # If the type expression has type parameters, iterate the params, evaluating them
         # recursively, and finally construct the output type with the evaluated params.
@@ -25,11 +28,11 @@ function _parse_type(ast; type_vars = nothing)
             arg = ast.args[i]
             if arg isa Expr && arg.head === :(<:) && length(arg.args) == 1
                 # Change `Vector{<:Number}` to `Vector{#s#27} where #s#27<:Number`
-                type_var = TypeVar(_unnamed_type_var(), _parse_type(arg.args[1]; type_vars))
+                type_var = TypeVar(_unnamed_type_var(), _parse_type(arg.args[1], type_vars))
                 push!(new_type_vars, type_var)
                 ast.args[i] = type_var
             else
-                ast.args[i] = _parse_type(ast.args[i]; type_vars)
+                ast.args[i] = _parse_type(ast.args[i], type_vars)
             end
         end
         # PERF: Drop the first element, instead of args[2:end], to avoid a new sub-vector
@@ -54,14 +57,14 @@ function _parse_type(ast; type_vars = nothing)
             push!(new_type_vars, type_var)
         end
         # Then evaluate the body in the context of those type vars
-        body = _parse_type(ast.args[1]; type_vars)
+        body = _parse_type(ast.args[1], type_vars)
         # Now work backwards through the new type vars and construct our wrapper UnionAlls:
         for type_var in reverse(new_type_vars)
             body = UnionAll(type_var, body)
         end
         return body
     elseif ast isa Expr && ast.head == :call && ast.args[1] === :typeof
-        return typeof(_parse_type(ast.args[2]; type_vars))
+        return typeof(_parse_type(ast.args[2], type_vars))
     elseif ast isa Expr && ast.head == :call
         return _parse_isbits_constructor(ast, type_vars)
     else
@@ -95,11 +98,11 @@ end
 # Parses constant isbits constructor expressions, like `Int32(10)` or `Point(0,0)`, as used in type
 # parameters like `Val{10}()` or `DefaultDict{Point(0,0)}`.
 function _parse_isbits_constructor(ast, type_vars)
-    typ = _parse_type(ast.args[1]; type_vars)
+    typ = _parse_type(ast.args[1], type_vars)
     # PERF: Reuse the args vector when parsing the type values.
     popfirst!(ast.args)
     for i in 1:length(ast.args)
-        ast.args[i] = _parse_type(ast.args[i]; type_vars)
+        ast.args[i] = _parse_type(ast.args[i], type_vars)
     end
     # We use reinterpret to avoid evaluating code, which may have side effects.
     return reinterpret(typ, Tuple(ast.args))
@@ -108,16 +111,16 @@ end
 _parse_type_var(ast::Symbol, _type_vars) = Core.TypeVar(ast)
 function _parse_type_var(ast::Expr, type_vars)
     if ast.head === :(<:)
-        return Core.TypeVar(ast.args[1], _parse_type(ast.args[2]; type_vars))
+        return Core.TypeVar(ast.args[1], _parse_type(ast.args[2], type_vars))
     elseif ast.head === :(>:)
-        return Core.TypeVar(ast.args[2], _parse_type(ast.args[1]; type_vars))
+        return Core.TypeVar(ast.args[2], _parse_type(ast.args[1], type_vars))
     elseif ast.head === :comparison
         if ast.args[2] === :(<:)
             @assert ast.args[4] === :(<:) "invalid bounds in \"where\": $ast"
-            return Core.TypeVar(ast.args[3], _parse_type(ast.args[1]; type_vars), _parse_type(ast.args[5]; type_vars))
+            return Core.TypeVar(ast.args[3], _parse_type(ast.args[1], type_vars), _parse_type(ast.args[5], type_vars))
         else
             @assert ast.args[2] === ast.args[4] === :(>:) "invalid bounds in \"where\": $ast"
-            return Core.TypeVar(ast.args[3], _parse_type(ast.args[5]; type_vars), _parse_type(ast.args[1]; type_vars))
+            return Core.TypeVar(ast.args[3], _parse_type(ast.args[5], type_vars), _parse_type(ast.args[1], type_vars))
         end
     else
         @assert false "invalid bounds in \"where\": $ast"
