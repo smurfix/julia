@@ -45,14 +45,18 @@ function _parse_type(ast; type_vars = nothing)
         return body
     elseif ast isa Expr && ast.head == :where
         # Collect all the type vars
+        # Keep them in order, since we need to wrap the UnionAlls in reverse order.
+        new_type_vars = TypeVar[]
         type_vars = Dict{Symbol, TypeVar}()
         for i in 2:length(ast.args)
             type_var = _parse_type_var(ast.args[i], type_vars)::TypeVar
             type_vars[type_var.name] = type_var
+            push!(new_type_vars, type_var)
         end
         # Then evaluate the body in the context of those type vars
         body = _parse_type(ast.args[1]; type_vars)
-        for (_, type_var) in type_vars
+        # Now work backwards through the new type vars and construct our wrapper UnionAlls:
+        for type_var in reverse(new_type_vars)
             body = UnionAll(type_var, body)
         end
         return body
