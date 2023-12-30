@@ -360,7 +360,7 @@ end
 
     @test parse(Type, "Vector") === Vector == Vector{<:Any}
 
-    @test_broken parse(Type, "Vector{<:Number}") == Vector{<:Number}
+    @test parse(Type, "Vector{<:Number}") == Vector{<:Number}
     @test parse(Type, "Vector{T} where T<:Number") == Vector{<:Number}
     @test_broken parse(Type, "Main.Vector{S} where {Int<:T<:Number, S<:T}") == Vector{S} where {Int64<:T<:Number, S<:T}
 
@@ -373,7 +373,7 @@ end
     @test parse(Type, "typeof(+)") === typeof(+)
     @test parse(Type, "typeof(Main.Base.:(+))") === typeof(+)
 
-    var"##1#2#3##"() = 2+2
+    @eval var"##1#2#3##"() = 2+2
     @test parse(Type, """typeof(var"##1#2#3##")""") === typeof(var"##1#2#3##")
 
     @testset "Constant isbits constructors" begin

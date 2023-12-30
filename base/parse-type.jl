@@ -6,21 +6,30 @@ function Base.parse(::Type{T}, str::AbstractString) where T<:Type
     T === Type && return v
     return v::T
 end
+
+# NOTE: This pattern is a hard-coded part of types: unnamed type variables start with `#s`.
+_unnamed_type_var() = Symbol("#s$(gensym())")
+
 function _parse_type(ast; type_vars = nothing)
     if ast isa Expr && ast.head == :curly
         typ = _parse_qualified_type(ast.args[1], type_vars)
         # PERF: Reuse the vector to save allocations
-        type_vars === nothing && (type_vars = Dict{Symbol, TypeVar}())
+        #type_vars === nothing && (type_vars = Dict{Symbol, TypeVar}())
+        new_type_vars = Vector{TypeVar}()
         for i in 2:length(ast.args)
-            if ast.args[i] isa Expr && ast.args[i].head === :(<:)
+            arg = ast.args[i]
+            if arg isa Expr && arg.head === :(<:) && length(arg.args) == 1
                 # Change `Vector{<:Number}` to `Vector{#s#27} where #s#27<:Number`
-                type_var = TypeVar(gensym("s"), _parse_type(ast.args[i].args[2]; type_vars))
-                pushfirst!(ast.args[i].args, type_var)
-                type_vars[type_var.name] = type_var
+                type_var = TypeVar(_unnamed_type_var(), _parse_type(arg.args[1]; type_vars))
+                push!(new_type_vars, type_var)
+                # We've consumed this type parameter, so remove it from the AST
+                #popfirst!(ast.args)
+                ast.args[i] = type_var
+                #pushfirst!(arg.args, type_var)
+                #type_vars[type_var.name] = type_var
         #@show type_vars
-        #@show ast.args[i]
-               body = _parse_type(ast.args[i]; type_vars)
-               ast.args[i] = UnionAll(type_var, body)
+               #body = typ{type_var}
+               #typ = UnionAll(type_var, body)
 
                 # ast.args[i] = TypeVar(gensym("s"), _parse_type(ast.args[i].args[1]; type_vars))
             else
@@ -29,7 +38,17 @@ function _parse_type(ast; type_vars = nothing)
         end
         # PERF: Drop the first element, instead of args[2:end], to avoid a new sub-vector
         popfirst!(ast.args)
-        return typ{ast.args...}
+        #@show typ
+        #@show ast.args
+        body = typ{ast.args...}
+        #@show new_type_vars
+        if !isempty(new_type_vars)
+            # Now work backwards through the new type vars and construct our wrapper UnionAlls:
+            for type_var in reverse(new_type_vars)
+                body = UnionAll(type_var, body)
+            end
+        end
+        return body
     elseif ast isa Expr && ast.head == :where
         # Collect all the type vars
         type_vars = Dict{Symbol, TypeVar}()
