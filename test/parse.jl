@@ -345,6 +345,14 @@ end
 
         @test_throws TypeError parse(Type{<:AbstractString}, "Int")
         @test_throws TypeError parse(DataType, "Vector")
+        @test nothing === tryparse(Type{<:AbstractString}, "Int")
+        @test nothing === tryparse(DataType, "Vector")
+    end
+    @testset "error conditions" begin
+        @test nothing === tryparse(Type, "Vector{")
+        @test nothing === tryparse(Type, "dhgfdhgdf{}")
+        @test nothing === tryparse(Type, "Vector{1,2,3}")
+        @test nothing === tryparse(Type, "Vector{,,,}")
     end
     @testset "custom structs" begin
         m = @eval Main module TestModule

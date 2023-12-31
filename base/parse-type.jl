@@ -1,7 +1,14 @@
 # Parses a string into a Julia type object, e.g. `Int`, `Array{Int, 2}`, etc.
 function Base.parse(::Type{T}, str::AbstractString) where T<:Type
-    ast = Meta.parse(str)
-    v = _parse_type(ast)
+    ast = try
+        Meta.parse(str)
+    catch
+        throw(ArgumentError("invalid type expression: $str"))
+    end
+    if ast isa Expr && ast.head === :incomplete
+        throw(ArgumentError("invalid type expression: $str"))
+    end
+    v = _try_parse_type(ast, true)
     if v === nothing
         throw(ArgumentError("invalid type expression: $str"))
     end
@@ -9,16 +16,34 @@ function Base.parse(::Type{T}, str::AbstractString) where T<:Type
     T === Type && return v
     return v::T
 end
+function Base.tryparse(::Type{T}, str::AbstractString) where {T<:Type}
+    ast = try Meta.parse(str) catch; return nothing end
+    v = _try_parse_type(ast, false)
+    v === nothing && return nothing
+    # Don't pay for the type check if not needed (~2 μs)
+    T === Type && return v
+    v isa T || return nothing
+    return v
+end
+
+# Simplify the commonly repeated pattern checking return values.
+macro _or_nothing(expr)
+    Base.remove_linenums!(quote
+        v = $(esc(expr))
+        v === nothing && return nothing
+        v
+    end)
+end
 
 # NOTE: This pattern is a hard-coded part of types: unnamed type variables start with `#s`.
 _unnamed_type_var() = Symbol("#s$(gensym())")
 
-function _parse_type(ast, type_vars = nothing)
+function _try_parse_type(ast, raise::Bool, type_vars = nothing)
     if ast isa Expr && ast.head == :curly
         # If the type expression has type parameters, iterate the params, evaluating them
         # recursively, and finally construct the output type with the evaluated params.
 
-        typ = _parse_qualified_type(ast.args[1], type_vars)
+        @_or_nothing typ = _try_parse_qualified_type(ast.args[1], raise, type_vars)
         # If any of the type parameters are unnamed type restrictions, like `<:Number`, we
         # will construct new anonymous type variables for them, and wrap the returned type
         # in a UnionAll.
@@ -28,16 +53,21 @@ function _parse_type(ast, type_vars = nothing)
             arg = ast.args[i]
             if arg isa Expr && arg.head === :(<:) && length(arg.args) == 1
                 # Change `Vector{<:Number}` to `Vector{#s#27} where #s#27<:Number`
-                type_var = TypeVar(_unnamed_type_var(), _parse_type(arg.args[1], type_vars))
+                type_var = TypeVar(_unnamed_type_var(), @_or_nothing(_try_parse_type(arg.args[1], raise, type_vars)))
                 push!(new_type_vars, type_var)
                 ast.args[i] = type_var
             else
-                ast.args[i] = _parse_type(ast.args[i], type_vars)
+                @_or_nothing ast.args[i] = _try_parse_type(ast.args[i], raise, type_vars)
             end
         end
         # PERF: Drop the first element, instead of args[2:end], to avoid a new sub-vector
         popfirst!(ast.args)
-        body = typ{ast.args...}
+        body = try
+            typ{ast.args...}
+        catch
+            raise && throw(ArgumentError("invalid type expression: $ast"))
+            return nothing
+        end
         # Handle any new type vars we created
         if !isempty(new_type_vars)
             # Now work backwards through the new type vars and construct our wrapper UnionAlls:
@@ -52,37 +82,41 @@ function _parse_type(ast, type_vars = nothing)
         new_type_vars = TypeVar[]
         type_vars = Dict{Symbol, TypeVar}()
         for i in 2:length(ast.args)
-            type_var = _parse_type_var(ast.args[i], type_vars)::TypeVar
+            @_or_nothing type_var = _try_parse_type_var(ast.args[i], raise, type_vars)
+            type_var::TypeVar
             type_vars[type_var.name] = type_var
             push!(new_type_vars, type_var)
         end
         # Then evaluate the body in the context of those type vars
-        body = _parse_type(ast.args[1], type_vars)
+        @_or_nothing body = _try_parse_type(ast.args[1], raise, type_vars)
         # Now work backwards through the new type vars and construct our wrapper UnionAlls:
         for type_var in reverse(new_type_vars)
             body = UnionAll(type_var, body)
         end
         return body
     elseif ast isa Expr && ast.head == :call && ast.args[1] === :typeof
-        return typeof(_parse_type(ast.args[2], type_vars))
+        return typeof(@_or_nothing _try_parse_type(ast.args[2], raise, type_vars))
     elseif ast isa Expr && ast.head == :call
-        return _parse_isbits_constructor(ast, type_vars)
+        return @_or_nothing _try_parse_isbits_constructor(ast, raise, type_vars)
     else
-        return _parse_qualified_type(ast, type_vars)
+        return @_or_nothing _try_parse_qualified_type(ast, raise, type_vars)
     end
 end
-_parse_qualified_type(val, _) = val
-function _parse_qualified_type(ast::Expr, type_vars)
-    @assert ast.head === :(.) "Failed to parse type expression. Expected a \
-            qualified type, e.g. `Base.Dict`, got: `$ast`"
-    mod = _parse_qualified_type(ast.args[1], type_vars)
+_try_parse_qualified_type(val, _, _) = val
+function _try_parse_qualified_type(ast::Expr, raise::Bool, type_vars)
+    if ast.head !== :(.)
+        raise && throw(ArgumentError("Failed to parse type expression. Expected a \
+                qualified type, e.g. `Base.Dict`, got: `$ast`"))
+        return nothing
+    end
+    @_or_nothing mod = _try_parse_qualified_type(ast.args[1], raise, type_vars)
     value = ast.args[2]
     if value isa QuoteNode
         value = value.value
     end
     return getglobal(mod, value)
 end
-function _parse_qualified_type(sym::Symbol, type_vars)
+function _try_parse_qualified_type(sym::Symbol, raise::Bool, type_vars)
     # First try to look up the symbol in the type vars
     if type_vars !== nothing
         v_if_found = get(type_vars, sym, :not_found)
@@ -92,35 +126,40 @@ function _parse_qualified_type(sym::Symbol, type_vars)
     end
     #@show type_vars
     # Otherwise, look up the symbol in Main
+    if !isdefined(Main, sym)
+        raise && throw(ArgumentError("Failed to parse type expression. Could not find \
+                symbol `$sym` in Main."))
+        return nothing
+    end
     getglobal(Main, sym)
 end
 
 # Parses constant isbits constructor expressions, like `Int32(10)` or `Point(0,0)`, as used in type
 # parameters like `Val{10}()` or `DefaultDict{Point(0,0)}`.
-function _parse_isbits_constructor(ast, type_vars)
-    typ = _parse_type(ast.args[1], type_vars)
+function _try_parse_isbits_constructor(ast, raise::Bool, type_vars)
+    @_or_nothing typ = _try_parse_type(ast.args[1], raise, type_vars)
     # PERF: Reuse the args vector when parsing the type values.
     popfirst!(ast.args)
     for i in 1:length(ast.args)
-        ast.args[i] = _parse_type(ast.args[i], type_vars)
+        @_or_nothing ast.args[i] = _try_parse_type(ast.args[i], raise, type_vars)
     end
     # We use reinterpret to avoid evaluating code, which may have side effects.
     return reinterpret(typ, Tuple(ast.args))
 end
 
-_parse_type_var(ast::Symbol, _type_vars) = Core.TypeVar(ast)
-function _parse_type_var(ast::Expr, type_vars)
+_try_parse_type_var(ast::Symbol, raise::Bool, _type_vars) = Core.TypeVar(ast)
+function _try_parse_type_var(ast::Expr, raise, type_vars)
     if ast.head === :(<:)
-        return Core.TypeVar(ast.args[1], _parse_type(ast.args[2], type_vars))
+        return Core.TypeVar(ast.args[1], @_or_nothing _try_parse_type(ast.args[2], raise, type_vars))
     elseif ast.head === :(>:)
-        return Core.TypeVar(ast.args[2], _parse_type(ast.args[1], type_vars))
+        return Core.TypeVar(ast.args[2], @_or_nothing _try_parse_type(ast.args[1], raise, type_vars))
     elseif ast.head === :comparison
         if ast.args[2] === :(<:)
             @assert ast.args[4] === :(<:) "invalid bounds in \"where\": $ast"
-            return Core.TypeVar(ast.args[3], _parse_type(ast.args[1], type_vars), _parse_type(ast.args[5], type_vars))
+            return Core.TypeVar(ast.args[3], @_or_nothing(_try_parse_type(ast.args[1], raise, type_vars)), @_or_nothing(_try_parse_type(ast.args[5], raise, type_vars)))
         else
             @assert ast.args[2] === ast.args[4] === :(>:) "invalid bounds in \"where\": $ast"
-            return Core.TypeVar(ast.args[3], _parse_type(ast.args[5], type_vars), _parse_type(ast.args[1], type_vars))
+            return Core.TypeVar(ast.args[3], @_or_nothing(_try_parse_type(ast.args[5], raise, type_vars)), @_or_nothing(_try_parse_type(ast.args[1], raise, type_vars)))
         end
     else
         @assert false "invalid bounds in \"where\": $ast"
