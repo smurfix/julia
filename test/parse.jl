@@ -337,6 +337,14 @@ end
 
         @test parse(DataType, "Int") === Int
         @test parse(DataType, "Main.Base.Vector{Base.Dict{Int, Base.Float64}}") === Vector{Dict{Int, Float64}}
+
+        @test parse(Type{Int}, "Int") === Int
+        @test parse(Type{<:Int}, "Int") === Int
+        @test parse(Type{<:Number}, "Int") === Int
+        @test parse(Type{<:Any}, "Int") === Int
+
+        @test_throws TypeError parse(Type{<:AbstractString}, "Int")
+        @test_throws TypeError parse(DataType, "Vector")
     end
     @testset "custom structs" begin
         m = @eval Main module TestModule
@@ -379,8 +387,23 @@ end
         @test parse(Type, """Array{Val{2}(),1}""") === Vector{Val{2}()}
         @test parse(Type, """Vector{Val{2}()}""") === Vector{Val{2}()}
 
-        @test parse(Type, "Val{S2(1,2.0)}()") === Val{S2(1,2)}()
+        @test parse(Type, "Val{TestModule.S2(1,2.0)}()") === Val{TestModule.S2(1,2)}()
 
         @test parse(Type, """Array{<:Any,2}""") == Array{<:Any,2} == Matrix
+    end
+
+    types = [
+        Int, Float64, Vector{Int}, Dict{Vector{Int}, Dict},
+        Vector, Dict,
+        Dict{K, Vector{K}} where K, Dict{Vector{<:V}, V} where V,
+        Vector{D} where D<:Dict{K, Vector{V}} where {V<:Number, K},
+        Val{T} where {S, T<:(Dict{<:Val, Vector{<:S}})},
+        Union{Int,Float64}, Union{}, Tuple{},
+        Union{NTuple{<:Any, Union{Nothing, Int}}, Tuple{Int,Float64}},
+        Union{NTuple{N, Union{Nothing, Int}}, Tuple{Int,Val{N}}} where N,
+    ]
+    @testset for T in types
+        @test parse(Type, string(T)) == T
+        @test parse(Type{T}, string(T)) == T
     end
 end
