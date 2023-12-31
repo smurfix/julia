@@ -44,6 +44,7 @@ function _try_parse_type(ast, raise::Bool, type_vars = nothing)
         # recursively, and finally construct the output type with the evaluated params.
 
         @_or_nothing typ = _try_parse_qualified_type(ast.args[1], raise, type_vars)
+        length(ast.args) == 1 && return typ
         # If any of the type parameters are unnamed type restrictions, like `<:Number`, we
         # will construct new anonymous type variables for them, and wrap the returned type
         # in a UnionAll.
@@ -71,7 +72,7 @@ function _try_parse_type(ast, raise::Bool, type_vars = nothing)
         # Handle any new type vars we created
         if !isempty(new_type_vars)
             # Now work backwards through the new type vars and construct our wrapper UnionAlls:
-            for type_var in reverse(new_type_vars)
+            for type_var in Iterators.reverse(new_type_vars)
                 body = UnionAll(type_var, body)
             end
         end
@@ -90,7 +91,7 @@ function _try_parse_type(ast, raise::Bool, type_vars = nothing)
         # Then evaluate the body in the context of those type vars
         @_or_nothing body = _try_parse_type(ast.args[1], raise, type_vars)
         # Now work backwards through the new type vars and construct our wrapper UnionAlls:
-        for type_var in reverse(new_type_vars)
+        for type_var in Iterators.reverse(new_type_vars)
             body = UnionAll(type_var, body)
         end
         return body
@@ -126,10 +127,8 @@ function _try_parse_qualified_type(sym::Symbol, raise::Bool, type_vars)
     end
     #@show type_vars
     # Otherwise, look up the symbol in Main
-    if !isdefined(Main, sym)
-        raise && throw(ArgumentError("Failed to parse type expression. Could not find \
-                symbol `$sym` in Main."))
-        return nothing
+    if !raise  # Skip the isdefined check if !raise, since getglobal will throw anyway.
+        !isdefined(Main, sym) && return nothing
     end
     getglobal(Main, sym)
 end
@@ -150,16 +149,16 @@ end
 _try_parse_type_var(ast::Symbol, raise::Bool, _type_vars) = Core.TypeVar(ast)
 function _try_parse_type_var(ast::Expr, raise, type_vars)
     if ast.head === :(<:)
-        return Core.TypeVar(ast.args[1], @_or_nothing _try_parse_type(ast.args[2], raise, type_vars))
+        return Core.TypeVar(ast.args[1]::Symbol, @_or_nothing _try_parse_type(ast.args[2], raise, type_vars))
     elseif ast.head === :(>:)
-        return Core.TypeVar(ast.args[2], @_or_nothing _try_parse_type(ast.args[1], raise, type_vars))
+        return Core.TypeVar(ast.args[2]::Symbol, @_or_nothing _try_parse_type(ast.args[1], raise, type_vars))
     elseif ast.head === :comparison
         if ast.args[2] === :(<:)
             @assert ast.args[4] === :(<:) "invalid bounds in \"where\": $ast"
-            return Core.TypeVar(ast.args[3], @_or_nothing(_try_parse_type(ast.args[1], raise, type_vars)), @_or_nothing(_try_parse_type(ast.args[5], raise, type_vars)))
+            return Core.TypeVar(ast.args[3]::Symbol, @_or_nothing(_try_parse_type(ast.args[1], raise, type_vars)), @_or_nothing(_try_parse_type(ast.args[5], raise, type_vars)))
         else
             @assert ast.args[2] === ast.args[4] === :(>:) "invalid bounds in \"where\": $ast"
-            return Core.TypeVar(ast.args[3], @_or_nothing(_try_parse_type(ast.args[5], raise, type_vars)), @_or_nothing(_try_parse_type(ast.args[1], raise, type_vars)))
+            return Core.TypeVar(ast.args[3]::Symbol, @_or_nothing(_try_parse_type(ast.args[5], raise, type_vars)), @_or_nothing(_try_parse_type(ast.args[1], raise, type_vars)))
         end
     else
         @assert false "invalid bounds in \"where\": $ast"
