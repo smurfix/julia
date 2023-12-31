@@ -330,56 +330,57 @@ end
     end
 end
 
-module TestModule
-module Inner
-struct X{A,B,C} end
-end
-end
-struct S2
-    a::Int
-    b::Float64
-end
-
 @testset "parse types" begin
     @testset "parse DataTypes" begin
-        @test parse(DataType, "Int") === Int
-        @test parse(DataType, "Main.Base.Vector{Base.Dict{Int, Base.Float64}}") === Vector{Dict{Int, Float64}}
-        @test parse(DataType, "TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}") ===
-                               TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
-        # m = Module()
-        # Core.eval(m, :(using Main.TestModule: Inner))
-        # @test Core.eval(m, quote
-        #     parse(DataType, "Inner.X{Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}")
-        # end) ===             Inner.X{Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
-
         @test parse(Type, "Int") === Int
         @test parse(Type, "Main.Base.Vector{Base.Dict{Int, Base.Float64}}") === Vector{Dict{Int, Float64}}
+
+        @test parse(DataType, "Int") === Int
+        @test parse(DataType, "Main.Base.Vector{Base.Dict{Int, Base.Float64}}") === Vector{Dict{Int, Float64}}
+    end
+    @testset "custom structs" begin
+        m = @eval Main module TestModule
+            module Inner
+                struct X{A,B,C} end
+            end
+            struct S2
+                a::Int
+                b::Float64
+            end
+        end
+        @test parse(DataType, "TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}") ===
+                               TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
+
         @test parse(Type, "TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}") ===
                            TestModule.Inner.X{TestModule.Inner.X{Int,Int,Int}, AbstractString, Dict{Int,Int}}
     end
 
-    @test parse(Type, "Vector") === Vector == Vector{<:Any}
+    @testset "UnionAlls" begin
+        @test parse(Type, "Vector") === Vector == Vector{<:Any}
 
-    @test parse(Type, "Vector{<:Number}") == Vector{<:Number}
-    @test parse(Type, "Vector{T} where T<:Number") == Vector{<:Number}
-    @test parse(Type, "Main.Vector{S} where {Int<:T<:Number, S<:T}") == Vector{S} where {Int64<:T<:Number, S<:T}
+        @test parse(Type, "Vector{<:Number}") == Vector{<:Number}
+        @test parse(Type, "Vector{T} where T<:Number") == Vector{<:Number}
+        @test parse(Type, "Main.Vector{S} where {Int<:T<:Number, S<:T}") == Vector{S} where {Int64<:T<:Number, S<:T}
 
-    @test parse(Type{Vector}, "Vector") === Vector == Vector{<:Any}
-    @test_throws TypeError parse(Type{Vector}, "Vector{Int}")
-    @test parse(Type{<:Vector}, "Vector{Int}") === Vector{Int}
+        @test parse(Type{Vector}, "Vector") === Vector == Vector{<:Any}
+        @test_throws TypeError parse(Type{Vector}, "Vector{Int}")
+        @test parse(Type{<:Vector}, "Vector{Int}") === Vector{Int}
 
-    @test parse(Type, "Union{Int, Float64}") === Union{Int, Float64}
+        @test parse(Type, "Union{Int, Float64}") === Union{Int, Float64}
 
-    @test parse(Type, "typeof(+)") === typeof(+)
-    @test parse(Type, "typeof(Main.Base.:(+))") === typeof(+)
+        @test parse(Type, "typeof(+)") === typeof(+)
+        @test parse(Type, "typeof(Main.Base.:(+))") === typeof(+)
 
-    @eval var"##1#2#3##"() = 2+2
-    @test parse(Type, """typeof(var"##1#2#3##")""") === typeof(var"##1#2#3##")
+        @eval var"##1#2#3##"() = 2+2
+        @test parse(Type, """typeof(var"##1#2#3##")""") === typeof(var"##1#2#3##")
+    end
 
     @testset "Constant isbits constructors" begin
         @test parse(Type, """Array{Val{2}(),1}""") === Vector{Val{2}()}
         @test parse(Type, """Vector{Val{2}()}""") === Vector{Val{2}()}
 
         @test parse(Type, "Val{S2(1,2.0)}()") === Val{S2(1,2)}()
+
+        @test parse(Type, """Array{<:Any,2}""") == Array{<:Any,2} == Matrix
     end
 end
