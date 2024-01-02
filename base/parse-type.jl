@@ -1,14 +1,7 @@
 # Parses a string into a Julia type object, e.g. `Int`, `Array{Int, 2}`, etc.
 function Base.parse(::Type{T}, str::AbstractString) where T<:Type
-    ast = try
-        Meta.parse(str)
-    catch
-        throw(ArgumentError("invalid type expression: $str"))
-    end
-    if ast isa Expr && ast.head === :incomplete
-        throw(ArgumentError("invalid type expression: $str"))
-    end
-    v = _try_parse_type(ast, true)
+    # tryparse(Type) instead of (T), so we only have to do the type check once.
+    v = Base.tryparse(Type, str)
     if v === nothing
         throw(ArgumentError("invalid type expression: $str"))
     end
@@ -17,7 +10,12 @@ function Base.parse(::Type{T}, str::AbstractString) where T<:Type
     return v::T
 end
 function Base.tryparse(::Type{T}, str::AbstractString) where {T<:Type}
-    ast = try Meta.parse(str) catch; return nothing end
+    ast = Meta.parse(str, raise=false)
+    # (This only needs to be checked once, so it's checked here, rather than in
+    # _try_parse_type, since _try_parse_type is self-recursive.)
+    if ast isa Expr && ast.head === :incomplete
+        return nothing
+    end
     v = _try_parse_type(ast, false)
     v === nothing && return nothing
     # Don't pay for the type check if not needed (~2 μs)
